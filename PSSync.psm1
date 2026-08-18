@@ -39,7 +39,7 @@
 # | - Mirror directory deletion is implemented and tested.                 |
 # | - -WhatIf behavior is implemented and tested.                          |
 # | - Synchronization planning is implemented.                             |
-# |                                                                        |
+# | - Initial synchronization test suite is passing.                       |
 # +------------------------------------------------------------------------+
 
 Set-StrictMode -Version Latest
