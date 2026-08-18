@@ -3,6 +3,6 @@
     <File Path="PSSync.psm1" />
   </Folder>
   <Folder Name="/Solution Items/Tests/">
-    <File Path="PSSync.Tests.ps1" />
+    <File Path="Tests/PSSync.Tests.ps1" />
   </Folder>
 </Solution>
