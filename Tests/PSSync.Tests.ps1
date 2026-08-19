@@ -98,4 +98,41 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Leaves a newer destination file unchanged" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "OLD SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "NEW DESTINATION CONTENT"
+
+            $SourceFile = Get-Item -LiteralPath $SourceFilePath
+            $DestinationFile = Get-Item -LiteralPath $DestinationFilePath
+
+            $SourceFile.LastWriteTime = $DestinationFile.LastWriteTime.AddMinutes(-10)
+
+            PSSync $SourcePath $DestinationPath
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
+
+            $DestinationContents.Trim() | Should Be "NEW DESTINATION CONTENT"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
