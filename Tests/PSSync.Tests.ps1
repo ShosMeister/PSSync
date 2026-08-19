@@ -211,4 +211,96 @@ Describe "PSSync Module" {
             }
         }
     }
+
+
+    It "Deletes an extraneous file inside a destination subdirectory in Mirror mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+
+        $ReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+        $ExtraneousFilePath = Join-Path -Path $ReportsPath -ChildPath "OldReport.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $ReportsPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            PSSync $SourcePath $DestinationPath -Mirror
+
+            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+
+            $ExtraneousFileExists | Should Be $false
+
+            $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
+
+            $DestinationFileExists | Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Deletes all empty extraneous parent directories in Mirror mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+
+        $OldProjectPath = Join-Path -Path $DestinationPath -ChildPath "OldProject"
+        $ArchivePath = Join-Path -Path $OldProjectPath -ChildPath "Archive"
+        $YearPath = Join-Path -Path $ArchivePath -ChildPath "2025"
+        $ExtraneousFilePath = Join-Path -Path $YearPath -ChildPath "OldFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $YearPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            PSSync $SourcePath $DestinationPath -Mirror
+
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $false
+
+            Test-Path -LiteralPath $YearPath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $ArchivePath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $OldProjectPath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
