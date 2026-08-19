@@ -614,4 +614,172 @@ Describe "PSSync Module" {
         }
     }
 
+    It "Reports nested Mirror deletions without deleting them in WhatIf mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+
+        $OldProjectPath = Join-Path -Path $DestinationPath -ChildPath "OldProject"
+        $ArchivePath = Join-Path -Path $OldProjectPath -ChildPath "Archive"
+        $YearPath = Join-Path -Path $ArchivePath -ChildPath "2025"
+        $ExtraneousFilePath = Join-Path -Path $YearPath -ChildPath "OldFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $YearPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            PSSync $SourcePath $DestinationPath -Mirror -WhatIf
+
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath $YearPath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $ArchivePath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $OldProjectPath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Reports nested directory creation without creating it in WhatIf mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
+        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
+
+        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "JANUARY SOURCE"
+
+            PSSync $SourcePath $DestinationPath -WhatIf
+
+            Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $false
+
+            Test-Path -LiteralPath $DestinationPath -PathType Container |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Reports mixed synchronization outcomes without changing the destination in WhatIf mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
+        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationReportsPath -Force | Out-Null
+
+            $SourceFile1Path = Join-Path -Path $SourcePath -ChildPath "File1.txt"
+            $DestinationFile1Path = Join-Path -Path $DestinationPath -ChildPath "File1.txt"
+
+            $SourceFile2Path = Join-Path -Path $SourcePath -ChildPath "File2.txt"
+            $DestinationFile2Path = Join-Path -Path $DestinationPath -ChildPath "File2.txt"
+
+            $SourceNewReportPath = Join-Path -Path $SourceReportsPath -ChildPath "NewReport.xlsx"
+            $DestinationNewReportPath = Join-Path -Path $DestinationReportsPath -ChildPath "NewReport.xlsx"
+
+            $DestinationOldFilePath = Join-Path -Path $DestinationPath -ChildPath "OldFile.txt"
+
+            Set-Content -Path $SourceFile1Path -Value "NEW FILE1 SOURCE"
+            Set-Content -Path $DestinationFile1Path -Value "OLD FILE1 DESTINATION"
+
+            Set-Content -Path $SourceFile2Path -Value "FILE2 SAME CONTENT"
+            Set-Content -Path $DestinationFile2Path -Value "FILE2 SAME CONTENT"
+
+            Set-Content -Path $SourceNewReportPath -Value "NEW REPORT SOURCE"
+
+            Set-Content -Path $DestinationOldFilePath -Value "OLD EXTRANEOUS FILE"
+
+            $SourceFile1 = Get-Item -LiteralPath $SourceFile1Path
+            $DestinationFile1 = Get-Item -LiteralPath $DestinationFile1Path
+
+            $DestinationFile1.LastWriteTime = $SourceFile1.LastWriteTime.AddMinutes(-10)
+
+            $SourceFile2 = Get-Item -LiteralPath $SourceFile2Path
+            $DestinationFile2 = Get-Item -LiteralPath $DestinationFile2Path
+
+            $DestinationFile2.LastWriteTime = $SourceFile2.LastWriteTime
+
+            PSSync $SourcePath $DestinationPath -Mirror -WhatIf
+
+            $DestinationFile1Contents = Get-Content -LiteralPath $DestinationFile1Path -Raw
+            $DestinationFile2Contents = Get-Content -LiteralPath $DestinationFile2Path -Raw
+            $OldFileContents = Get-Content -LiteralPath $DestinationOldFilePath -Raw
+
+            $DestinationFile1Contents.Trim() | Should Be "OLD FILE1 DESTINATION"
+            $DestinationFile2Contents.Trim() | Should Be "FILE2 SAME CONTENT"
+            $OldFileContents.Trim() | Should Be "OLD EXTRANEOUS FILE"
+
+            Test-Path -LiteralPath $DestinationNewReportPath -PathType Leaf |
+                Should Be $false
+
+            Test-Path -LiteralPath $DestinationOldFilePath -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFile1Path -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFile2Path -PathType Leaf |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
 }
