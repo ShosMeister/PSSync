@@ -382,4 +382,44 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Creates nested source directories and copies their files" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
+        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
+
+        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "JANUARY SOURCE"
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
+
+            $DestinationContents.Trim() | Should Be "JANUARY SOURCE"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
