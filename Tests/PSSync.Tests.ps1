@@ -948,4 +948,41 @@ Describe "PSSync Module" {
         }
     }
 
+
+    It "Handles a destination path that is an existing file" {
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationPath -Value "DESTINATION FILE"
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path -LiteralPath $DestinationPath -PathType Leaf |
+                Should Be $true
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationPath -Raw
+
+            $DestinationContents.Trim() | Should Be "DESTINATION FILE"
+
+            Test-Path -LiteralPath (Join-Path $DestinationPath "TestFile.txt") -PathType Leaf |
+                Should Be $false
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
 }
