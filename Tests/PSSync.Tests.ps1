@@ -568,4 +568,26 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Rejects source and destination when they are the same directory" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        try
+        {
+            New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
+
+            {
+                PSSync $TestRoot $TestRoot
+            } | Should Throw
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
 }
