@@ -546,4 +546,26 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Rejects a source directory that does not exist" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "MissingSource"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        try
+        {
+            {
+                PSSync $SourcePath $DestinationPath
+            } | Should Throw
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
