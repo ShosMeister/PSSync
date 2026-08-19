@@ -466,4 +466,84 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Handles multiple synchronization outcomes in one run" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
+        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationReportsPath -Force | Out-Null
+
+            $SourceFile1Path = Join-Path -Path $SourcePath -ChildPath "File1.txt"
+            $DestinationFile1Path = Join-Path -Path $DestinationPath -ChildPath "File1.txt"
+
+            $SourceFile2Path = Join-Path -Path $SourcePath -ChildPath "File2.txt"
+            $DestinationFile2Path = Join-Path -Path $DestinationPath -ChildPath "File2.txt"
+
+            $SourceJanuaryPath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
+            $DestinationJanuaryPath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+
+            $SourceFebruaryPath = Join-Path -Path $SourceReportsPath -ChildPath "February.xlsx"
+            $DestinationFebruaryPath = Join-Path -Path $DestinationReportsPath -ChildPath "February.xlsx"
+
+            Set-Content -Path $SourceFile1Path -Value "FILE1 NEW SOURCE"
+            Set-Content -Path $DestinationFile1Path -Value "FILE1 OLD DESTINATION"
+
+            Set-Content -Path $SourceFile2Path -Value "FILE2 SAME CONTENT"
+            Set-Content -Path $DestinationFile2Path -Value "FILE2 SAME CONTENT"
+
+            Set-Content -Path $SourceJanuaryPath -Value "JANUARY NEW SOURCE"
+            Set-Content -Path $DestinationJanuaryPath -Value "JANUARY OLD DESTINATION"
+
+            Set-Content -Path $SourceFebruaryPath -Value "FEBRUARY SAME CONTENT"
+            Set-Content -Path $DestinationFebruaryPath -Value "FEBRUARY SAME CONTENT"
+
+            $SourceFile1 = Get-Item -LiteralPath $SourceFile1Path
+            $DestinationFile1 = Get-Item -LiteralPath $DestinationFile1Path
+
+            $DestinationFile1.LastWriteTime = $SourceFile1.LastWriteTime.AddMinutes(-10)
+
+            $SourceJanuary = Get-Item -LiteralPath $SourceJanuaryPath
+            $DestinationJanuary = Get-Item -LiteralPath $DestinationJanuaryPath
+
+            $DestinationJanuary.LastWriteTime = $SourceJanuary.LastWriteTime.AddMinutes(-10)
+
+            $SourceFile2 = Get-Item -LiteralPath $SourceFile2Path
+            $DestinationFile2 = Get-Item -LiteralPath $DestinationFile2Path
+
+            $DestinationFile2.LastWriteTime = $SourceFile2.LastWriteTime
+
+            $SourceFebruary = Get-Item -LiteralPath $SourceFebruaryPath
+            $DestinationFebruary = Get-Item -LiteralPath $DestinationFebruaryPath
+
+            $DestinationFebruary.LastWriteTime = $SourceFebruary.LastWriteTime
+
+            PSSync $SourcePath $DestinationPath
+
+            $DestinationFile1Contents = Get-Content -LiteralPath $DestinationFile1Path -Raw
+            $DestinationFile2Contents = Get-Content -LiteralPath $DestinationFile2Path -Raw
+            $DestinationJanuaryContents = Get-Content -LiteralPath $DestinationJanuaryPath -Raw
+            $DestinationFebruaryContents = Get-Content -LiteralPath $DestinationFebruaryPath -Raw
+
+            $DestinationFile1Contents.Trim() | Should Be "FILE1 NEW SOURCE"
+            $DestinationFile2Contents.Trim() | Should Be "FILE2 SAME CONTENT"
+            $DestinationJanuaryContents.Trim() | Should Be "JANUARY NEW SOURCE"
+            $DestinationFebruaryContents.Trim() | Should Be "FEBRUARY SAME CONTENT"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
