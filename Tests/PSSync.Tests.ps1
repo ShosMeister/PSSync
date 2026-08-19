@@ -782,4 +782,96 @@ Describe "PSSync Module" {
         }
     }
 
+    It "Handles an empty source directory" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path -LiteralPath $DestinationPath -PathType Container |
+                Should Be $true
+
+            $DestinationFiles = Get-ChildItem -LiteralPath $DestinationPath -Recurse -File
+
+            $DestinationFiles.Count | Should Be 0
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Leaves destination files unchanged when the source is empty in normal mode" {
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "ExistingFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
+
+            $DestinationContents.Trim() | Should Be "DESTINATION CONTENT"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Deletes destination files when the source is empty in Mirror mode" {
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "ExistingFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+
+            PSSync $SourcePath $DestinationPath -Mirror
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $false
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+
 }
