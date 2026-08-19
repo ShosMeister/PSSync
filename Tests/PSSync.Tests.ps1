@@ -873,5 +873,79 @@ Describe "PSSync Module" {
         }
     }
 
+    It "Reports an error when a source file conflicts with a destination directory" {
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "Conflict.txt"
+        $DestinationConflictPath = Join-Path -Path $DestinationPath -ChildPath "Conflict.txt"
+        $DestinationFileInsidePath = Join-Path -Path $DestinationConflictPath -ChildPath "Conflict.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationConflictPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+
+            {
+                PSSync $SourcePath $DestinationPath
+            } | Should Throw
+
+            Test-Path -LiteralPath $DestinationConflictPath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFileInsidePath -PathType Leaf |
+                Should Be $false
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
+
+    It "Reports an error when a source directory conflicts with a destination file" {
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceConflictPath = Join-Path -Path $SourcePath -ChildPath "Conflict.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "Conflict.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceConflictPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+
+            {
+                PSSync $SourcePath $DestinationPath
+            } | Should Throw
+
+            Test-Path -LiteralPath $SourceConflictPath -PathType Container |
+                Should Be $true
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
+
+            $DestinationContents.Trim() | Should Be "DESTINATION CONTENT"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 
 }
