@@ -135,4 +135,42 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Leaves an extraneous destination file unchanged in normal mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            PSSync $SourcePath $DestinationPath
+
+            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+
+            $ExtraneousFileExists | Should Be $true
+
+            $ExtraneousContents = Get-Content -LiteralPath $ExtraneousFilePath -Raw
+
+            $ExtraneousContents.Trim() | Should Be "EXTRANEOUS CONTENT"
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
