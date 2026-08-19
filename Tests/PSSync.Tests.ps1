@@ -349,4 +349,37 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Reports creation without creating files in WhatIf mode when the destination is missing" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+
+            PSSync $SourcePath $DestinationPath -WhatIf
+
+            Test-Path -LiteralPath $DestinationPath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $false
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
