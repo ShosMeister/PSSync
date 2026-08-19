@@ -303,4 +303,50 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Reports changes without modifying files in WhatIf mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "NEW SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "OLD DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            $DestinationBefore = Get-Content -LiteralPath $DestinationFilePath -Raw
+            $ExtraneousBefore = Get-Content -LiteralPath $ExtraneousFilePath -Raw
+
+            PSSync $SourcePath $DestinationPath -Mirror -WhatIf
+
+            $DestinationAfter = Get-Content -LiteralPath $DestinationFilePath -Raw
+            $ExtraneousAfter = Get-Content -LiteralPath $ExtraneousFilePath -Raw
+
+            $DestinationAfter.Trim() | Should Be "OLD DESTINATION CONTENT"
+            $ExtraneousAfter.Trim() | Should Be "EXTRANEOUS CONTENT"
+
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
