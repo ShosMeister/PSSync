@@ -234,6 +234,31 @@ function PSSync
     $FilesToDelete = @()
     $DirectoriesToDelete = @()
 
+    # +--------------------------------------------------------------------+
+    # | File / Directory Conflict Detection                                |
+    # +--------------------------------------------------------------------+
+
+    foreach ($tmpFile in $SourceFiles)
+    {
+        $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpFile.FullName
+        $DestinationDirectoryPath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
+
+        if (Test-Path -LiteralPath $DestinationDirectoryPath -PathType Container)
+        {
+            throw "File/directory conflict at relative path: $RelativePath"
+        }
+    }
+
+    foreach ($tmpDirectory in $SourceDirectories)
+    {
+        $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpDirectory.FullName
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
+
+        if (Test-Path -LiteralPath $DestinationFilePath -PathType Leaf)
+        {
+            throw "File/directory conflict at relative path: $RelativePath"
+        }
+    }
     if (-not $DestinationExists)
     {
         $DirectoriesToCreate += $DestinationPath
