@@ -422,4 +422,48 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Updates a newer file in an existing nested directory" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+
+        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
+        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+
+        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
+        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationReportsPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "NEW JANUARY SOURCE"
+            Set-Content -Path $DestinationFilePath -Value "OLD JANUARY DESTINATION"
+
+            $SourceFile = Get-Item -LiteralPath $SourceFilePath
+            $DestinationFile = Get-Item -LiteralPath $DestinationFilePath
+
+            $DestinationFile.LastWriteTime = $SourceFile.LastWriteTime.AddMinutes(-10)
+
+            PSSync $SourcePath $DestinationPath
+
+            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
+
+            $DestinationContents.Trim() | Should Be "NEW JANUARY SOURCE"
+
+            Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
+                Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
