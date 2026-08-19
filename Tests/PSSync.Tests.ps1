@@ -173,4 +173,42 @@ Describe "PSSync Module" {
             }
         }
     }
+
+    It "Deletes an extraneous destination file in Mirror mode" {
+
+        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
+        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+
+            PSSync $SourcePath $DestinationPath -Mirror
+
+            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+
+            $ExtraneousFileExists | Should Be $false
+
+            $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
+
+            $DestinationFileExists | Should Be $true
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $TestRoot)
+            {
+                Remove-Item -LiteralPath $TestRoot -Recurse -Force
+            }
+        }
+    }
 }
