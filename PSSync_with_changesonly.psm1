@@ -170,8 +170,8 @@ function PSSync
 
         [Parameter()]
         [switch]$Mirror,
-        [switch]$ChangesOnly
 
+        [switch]$ChangesOnly
     )
 
     $SourcePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Source)
@@ -210,87 +210,25 @@ function PSSync
 
     $DestinationExists = Test-Path -LiteralPath $DestinationPath -PathType Container
 
-    # +--------------------------------------------------------------------+
-    # | Enumerate Source                                                    |
-    # +--------------------------------------------------------------------+
-    $SourceFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
-    $SourceDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
-
-    Write-Progress -Activity "PSSync" -Status "Enumerating source files..."
-
-    foreach ($tmpItem in Get-ChildItem -LiteralPath $SourcePath -File -Recurse -ErrorAction Stop)
-    {
-        $SourceFiles.Add($tmpItem)
-
-        if (($SourceFiles.Count % 100) -eq 0)
-        {
-            Write-Progress -Activity "PSSync" -Status "Enumerating source files... $($SourceFiles.Count) found"
-        }
-    }
-
-    Write-Progress -Activity "PSSync" -Status "Enumerating source files... $($SourceFiles.Count) found"
-    Write-Progress -Activity "PSSync" -Status "Enumerating source directories..."
-
-    foreach ($tmpItem in Get-ChildItem -LiteralPath $SourcePath -Directory -Recurse -ErrorAction Stop)
-    {
-        $SourceDirectories.Add($tmpItem)
-
-        if (($SourceDirectories.Count % 100) -eq 0)
-        {
-            Write-Progress -Activity "PSSync" -Status "Enumerating source directories... $($SourceDirectories.Count) found"
-        }
-    }
-
-    Write-Progress -Activity "PSSync" -Status "Enumerating source directories... $($SourceDirectories.Count) found"
-
-    # +--------------------------------------------------------------------+
-    # | Enumerate Destination                                              |
-    # +--------------------------------------------------------------------+
-    $DestinationFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
-    $DestinationDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
-
     if ($DestinationExists)
     {
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination files..."
-
-        foreach ($tmpItem in Get-ChildItem -LiteralPath $DestinationPath -File -Recurse -ErrorAction Stop)
-        {
-            $DestinationFiles.Add($tmpItem)
-
-            if (($DestinationFiles.Count % 100) -eq 0)
-            {
-                Write-Progress -Activity "PSSync" -Status "Enumerating destination files... $($DestinationFiles.Count) found"
-            }
-        }
-
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination files... $($DestinationFiles.Count) found"
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination directories..."
-
-        foreach ($tmpItem in Get-ChildItem -LiteralPath $DestinationPath -Directory -Recurse -ErrorAction Stop)
-        {
-            $DestinationDirectories.Add($tmpItem)
-
-            if (($DestinationDirectories.Count % 100) -eq 0)
-            {
-                Write-Progress -Activity "PSSync" -Status "Enumerating destination directories... $($DestinationDirectories.Count) found"
-            }
-        }
-
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination directories... $($DestinationDirectories.Count) found"
+        $SourceFiles = @(Get-ChildItem -LiteralPath $SourcePath -File -Recurse -ErrorAction Stop)
+        $SourceDirectories = @(Get-ChildItem -LiteralPath $SourcePath -Directory -Recurse -ErrorAction Stop)
+        $DestinationFiles = @(Get-ChildItem -LiteralPath $DestinationPath -File -Recurse -ErrorAction Stop)
+        $DestinationDirectories = @(Get-ChildItem -LiteralPath $DestinationPath -Directory -Recurse -ErrorAction Stop)
     }
-
-    # +--------------------------------------------------------------------+
-    # | Determine Workload                                                 |
-    # +--------------------------------------------------------------------+
-    $TotalFileCount = $SourceFiles.Count + $DestinationFiles.Count
-    $TotalDirectoryCount = $SourceDirectories.Count + $DestinationDirectories.Count
-
-    Write-Progress -Activity "PSSync" -Status "Determining workload..."
-    Start-Sleep -Milliseconds 100
+    else
+    {
+        $SourceFiles = @(Get-ChildItem -LiteralPath $SourcePath -File -Recurse -ErrorAction Stop)
+        $SourceDirectories = @(Get-ChildItem -LiteralPath $SourcePath -Directory -Recurse -ErrorAction Stop)
+        $DestinationFiles = @()
+        $DestinationDirectories = @()
+    }
 
     # +--------------------------------------------------------------------+
     # | Synchronization Plan                                               |
     # +--------------------------------------------------------------------+
+
     $DirectoriesToCreate = @()
     $FilesToCopy = @()
     $FilesToUpdate = @()
@@ -298,21 +236,9 @@ function PSSync
     $FilesToDelete = @()
     $DirectoriesToDelete = @()
 
-    $AnalyzedFileCount = 0
-    $AnalyzedDirectoryCount = 0
-    $TotalAnalysisItemCount = $SourceFiles.Count + $SourceDirectories.Count + $DestinationFiles.Count
-
-    if ($Mirror)
-    {
-        $TotalAnalysisItemCount = $TotalAnalysisItemCount + $DestinationDirectories.Count
-    }
-
-    $AnalysisUpdateInterval = 100
-
     # +--------------------------------------------------------------------+
     # | File / Directory Conflict Detection                                |
     # +--------------------------------------------------------------------+
-    Write-Progress -Activity "PSSync" -Status "Checking for file/directory conflicts..."
 
     foreach ($tmpFile in $SourceFiles)
     {
@@ -321,7 +247,6 @@ function PSSync
 
         if (Test-Path -LiteralPath $DestinationDirectoryPath -PathType Container)
         {
-            Write-Progress -Activity "PSSync" -Completed
             throw "File/directory conflict at relative path: $RelativePath"
         }
     }
@@ -333,16 +258,9 @@ function PSSync
 
         if (Test-Path -LiteralPath $DestinationFilePath -PathType Leaf)
         {
-            Write-Progress -Activity "PSSync" -Completed
             throw "File/directory conflict at relative path: $RelativePath"
         }
     }
-
-    # +--------------------------------------------------------------------+
-    # | Build Synchronization Plan                                          |
-    # +--------------------------------------------------------------------+
-    Write-Progress -Activity "PSSync" -Status "Analyzing source and destination..." -PercentComplete 0
-
     if (-not $DestinationExists)
     {
         $DirectoriesToCreate += $DestinationPath
@@ -357,24 +275,6 @@ function PSSync
         if (-not $DestinationDirectoryExists)
         {
             $DirectoriesToCreate += $DestinationDirectoryPath
-        }
-
-        $AnalyzedDirectoryCount = $AnalyzedDirectoryCount + 1
-
-        if (($AnalyzedDirectoryCount % $AnalysisUpdateInterval) -eq 0)
-        {
-            $AnalyzedItemCount = $AnalyzedFileCount + $AnalyzedDirectoryCount
-
-            if ($TotalAnalysisItemCount -gt 0)
-            {
-                $PercentComplete = [int](($AnalyzedItemCount / $TotalAnalysisItemCount) * 100)
-            }
-            else
-            {
-                $PercentComplete = 100
-            }
-
-            Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Directories: $AnalyzedDirectoryCount / $TotalDirectoryCount" -PercentComplete $PercentComplete
         }
     }
 
@@ -406,24 +306,6 @@ function PSSync
                 $FilesToLeaveAlone += $RelativePath
             }
         }
-
-        $AnalyzedFileCount = $AnalyzedFileCount + 1
-
-        if (($AnalyzedFileCount % $AnalysisUpdateInterval) -eq 0)
-        {
-            $AnalyzedItemCount = $AnalyzedFileCount + $AnalyzedDirectoryCount
-
-            if ($TotalAnalysisItemCount -gt 0)
-            {
-                $PercentComplete = [int](($AnalyzedItemCount / $TotalAnalysisItemCount) * 100)
-            }
-            else
-            {
-                $PercentComplete = 100
-            }
-
-            Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Files: $AnalyzedFileCount / $TotalFileCount" -PercentComplete $PercentComplete
-        }
     }
 
     foreach ($tmpFile in $DestinationFiles)
@@ -435,24 +317,6 @@ function PSSync
         if (-not $SourceFileExists)
         {
             $FilesToDelete += $tmpFile
-        }
-
-        $AnalyzedFileCount = $AnalyzedFileCount + 1
-
-        if (($AnalyzedFileCount % $AnalysisUpdateInterval) -eq 0)
-        {
-            $AnalyzedItemCount = $AnalyzedFileCount + $AnalyzedDirectoryCount
-
-            if ($TotalAnalysisItemCount -gt 0)
-            {
-                $PercentComplete = [int](($AnalyzedItemCount / $TotalAnalysisItemCount) * 100)
-            }
-            else
-            {
-                $PercentComplete = 100
-            }
-
-            Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Files: $AnalyzedFileCount / $TotalFileCount" -PercentComplete $PercentComplete
         }
     }
 
@@ -473,34 +337,13 @@ function PSSync
             {
                 $DirectoriesToDelete += $tmpDirectory
             }
-
-            $AnalyzedDirectoryCount = $AnalyzedDirectoryCount + 1
-
-            if (($AnalyzedDirectoryCount % $AnalysisUpdateInterval) -eq 0)
-            {
-                $AnalyzedItemCount = $AnalyzedFileCount + $AnalyzedDirectoryCount
-
-                if ($TotalAnalysisItemCount -gt 0)
-                {
-                    $PercentComplete = [int](($AnalyzedItemCount / $TotalAnalysisItemCount) * 100)
-                }
-                else
-                {
-                    $PercentComplete = 100
-                }
-
-                Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Directories: $AnalyzedDirectoryCount / $TotalDirectoryCount" -PercentComplete $PercentComplete
-            }
         }
     }
-
-    Write-Progress -Activity "PSSync" -Status "Analysis complete." -PercentComplete 100
-    Start-Sleep -Milliseconds 100
-    Write-Progress -Activity "PSSync" -Completed
 
     # +--------------------------------------------------------------------+
     # | WhatIf Reporting                                                   |
     # +--------------------------------------------------------------------+
+
     if ($WhatIfPreference)
     {
         foreach ($tmpDirectory in $DirectoriesToCreate)
@@ -522,15 +365,15 @@ function PSSync
             $WouldUpdateCount = $WouldUpdateCount + 1
         }
 
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    if (-not $ChangesOnly)
-    {
-        Write-Host "WOULD LEAVE ALONE: $RelativePath"
-    }
+        foreach ($RelativePath in $FilesToLeaveAlone)
+        {
+            if (-not $ChangesOnly)
+        {
+            Write-Host "WOULD LEAVE ALONE: $RelativePath"
+        }
+            $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
+        }
 
-    $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
-}
         if ($Mirror)
         {
             foreach ($tmpFile in $FilesToDelete)
@@ -567,6 +410,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Directory Creation                                                 |
     # +--------------------------------------------------------------------+
+
     foreach ($DirectoryPath in $DirectoriesToCreate)
     {
         try
@@ -585,6 +429,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | File Copying                                                       |
     # +--------------------------------------------------------------------+
+
     foreach ($tmpFile in $FilesToCopy)
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpFile.FullName
@@ -606,6 +451,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | File Updates                                                       |
     # +--------------------------------------------------------------------+
+
     foreach ($tmpFile in $FilesToUpdate)
     {
         try
@@ -624,18 +470,20 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Unchanged Files                                                    |
     # +--------------------------------------------------------------------+
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    $UnchangedCount = $UnchangedCount + 1
 
-    if (-not $ChangesOnly)
+    foreach ($RelativePath in $FilesToLeaveAlone)
     {
-        Write-Host "UNCHANGED: $RelativePath"
+        $UnchangedCount = $UnchangedCount + 1
+        if (-not $ChangesOnly)
+        {
+            Write-Host "UNCHANGED: $RelativePath"
+        }
     }
-}
+
     # +--------------------------------------------------------------------+
     # | Mirror File Deletion                                               |
     # +--------------------------------------------------------------------+
+
     if ($Mirror)
     {
         foreach ($tmpFile in $FilesToDelete)
@@ -684,6 +532,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Final Summary                                                      |
     # +--------------------------------------------------------------------+
+
     Write-Host ""
     Write-Host "PSSync Complete"
     Write-Host "------------------------------"

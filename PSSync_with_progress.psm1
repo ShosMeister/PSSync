@@ -1,4 +1,4 @@
-﻿# +------------------------------------------------------------------------+
+# +------------------------------------------------------------------------+
 # | PSSync                                                                 |
 # +------------------------------------------------------------------------+
 # | Purpose:                                                               |
@@ -169,9 +169,7 @@ function PSSync
         [string]$Destination,
 
         [Parameter()]
-        [switch]$Mirror,
-        [switch]$ChangesOnly
-
+        [switch]$Mirror
     )
 
     $SourcePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Source)
@@ -213,6 +211,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | Enumerate Source                                                    |
     # +--------------------------------------------------------------------+
+
     $SourceFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
     $SourceDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
 
@@ -244,8 +243,9 @@ function PSSync
     Write-Progress -Activity "PSSync" -Status "Enumerating source directories... $($SourceDirectories.Count) found"
 
     # +--------------------------------------------------------------------+
-    # | Enumerate Destination                                              |
+    # | Enumerate Destination                                               |
     # +--------------------------------------------------------------------+
+
     $DestinationFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
     $DestinationDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
 
@@ -282,6 +282,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | Determine Workload                                                 |
     # +--------------------------------------------------------------------+
+
     $TotalFileCount = $SourceFiles.Count + $DestinationFiles.Count
     $TotalDirectoryCount = $SourceDirectories.Count + $DestinationDirectories.Count
 
@@ -291,6 +292,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | Synchronization Plan                                               |
     # +--------------------------------------------------------------------+
+
     $DirectoriesToCreate = @()
     $FilesToCopy = @()
     $FilesToUpdate = @()
@@ -312,6 +314,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | File / Directory Conflict Detection                                |
     # +--------------------------------------------------------------------+
+
     Write-Progress -Activity "PSSync" -Status "Checking for file/directory conflicts..."
 
     foreach ($tmpFile in $SourceFiles)
@@ -341,6 +344,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | Build Synchronization Plan                                          |
     # +--------------------------------------------------------------------+
+
     Write-Progress -Activity "PSSync" -Status "Analyzing source and destination..." -PercentComplete 0
 
     if (-not $DestinationExists)
@@ -501,6 +505,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | WhatIf Reporting                                                   |
     # +--------------------------------------------------------------------+
+
     if ($WhatIfPreference)
     {
         foreach ($tmpDirectory in $DirectoriesToCreate)
@@ -522,15 +527,12 @@ function PSSync
             $WouldUpdateCount = $WouldUpdateCount + 1
         }
 
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    if (-not $ChangesOnly)
-    {
-        Write-Host "WOULD LEAVE ALONE: $RelativePath"
-    }
+        foreach ($RelativePath in $FilesToLeaveAlone)
+        {
+            Write-Host "WOULD LEAVE ALONE: $RelativePath"
+            $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
+        }
 
-    $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
-}
         if ($Mirror)
         {
             foreach ($tmpFile in $FilesToDelete)
@@ -567,6 +569,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Directory Creation                                                 |
     # +--------------------------------------------------------------------+
+
     foreach ($DirectoryPath in $DirectoriesToCreate)
     {
         try
@@ -585,6 +588,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | File Copying                                                       |
     # +--------------------------------------------------------------------+
+
     foreach ($tmpFile in $FilesToCopy)
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpFile.FullName
@@ -606,6 +610,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | File Updates                                                       |
     # +--------------------------------------------------------------------+
+
     foreach ($tmpFile in $FilesToUpdate)
     {
         try
@@ -624,18 +629,17 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Unchanged Files                                                    |
     # +--------------------------------------------------------------------+
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    $UnchangedCount = $UnchangedCount + 1
 
-    if (-not $ChangesOnly)
+    foreach ($RelativePath in $FilesToLeaveAlone)
     {
+        $UnchangedCount = $UnchangedCount + 1
         Write-Host "UNCHANGED: $RelativePath"
     }
-}
+
     # +--------------------------------------------------------------------+
     # | Mirror File Deletion                                               |
     # +--------------------------------------------------------------------+
+
     if ($Mirror)
     {
         foreach ($tmpFile in $FilesToDelete)
@@ -684,6 +688,7 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Final Summary                                                      |
     # +--------------------------------------------------------------------+
+
     Write-Host ""
     Write-Host "PSSync Complete"
     Write-Host "------------------------------"
