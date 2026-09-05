@@ -21,6 +21,8 @@
 # | - Optionally removes destination-only directories with -Mirror.        |
 # | - Supports PowerShell's standard -WhatIf functionality.                |
 # | - Reports synchronization results and a final operation summary.       |
+# | - Provides optional ChangesOnly output to suppress no-change messages. |
+# | - Displays progress while enumerating and analyzing large trees.       |
 # |                                                                        |
 # | Synchronization Rules:                                                 |
 # | - A source directory that does not exist in the destination is created.|
@@ -38,8 +40,11 @@
 # | - Mirror file deletion is implemented and tested.                      |
 # | - Mirror directory deletion is implemented and tested.                 |
 # | - -WhatIf behavior is implemented and tested.                          |
+# | - -ChangesOnly output filtering is implemented and tested.             |
+# | - Progress reporting is implemented for large directory trees.         |
 # | - Synchronization planning is implemented.                             |
-# | - Initial synchronization test suite is passing.                       |
+# | - File/directory conflict detection is implemented and tested.         |
+# | - The current Pester test suite is passing.                            |
 # +------------------------------------------------------------------------+
 
 Set-StrictMode -Version Latest
@@ -134,9 +139,17 @@ function Get-PSSyncRelativePath
 # | - When specified, displays what would happen without modifying files   |
 # |   or directories.                                                      |
 # |                                                                        |
+# | ChangesOnly As Switch                                                  |
+# | - When specified, suppresses per-item messages for files that require  |
+# |   no action.                                                           |
+# | - Normal execution suppresses UNCHANGED messages.                      |
+# | - WhatIf execution suppresses WOULD LEAVE ALONE messages.              |
+# | - Does not change synchronization behavior or summary counts.          |
+# |                                                                        |
 # | Outputs:                                                               |
 # | Normal execution reports operations actually performed.                |
 # | WhatIf execution reports operations that would be performed.           |
+# | ChangesOnly affects output detail only; it does not affect the plan.   |
 # |                                                                        |
 # | State Changes:                                                         |
 # | - Normal execution may create, copy, update, or delete file-system     |
@@ -147,6 +160,7 @@ function Get-PSSyncRelativePath
 # | PSSync "C:\Source" "D:\Destination"                                    |
 # | PSSync "C:\Source" "D:\Destination" -Mirror                            |
 # | PSSync "C:\Source" "D:\Destination" -Mirror -WhatIf                    |
+# | PSSync "C:\Source" "D:\Destination" -ChangesOnly                       |
 # |                                                                        |
 # | Error Handling:                                                        |
 # | Source validation errors generate terminating errors. File-system      |
@@ -213,6 +227,7 @@ function PSSync
     # +--------------------------------------------------------------------+
     # | Enumerate Source                                                    |
     # +--------------------------------------------------------------------+
+
     $SourceFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
     $SourceDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
 
@@ -339,7 +354,7 @@ function PSSync
     }
 
     # +--------------------------------------------------------------------+
-    # | Build Synchronization Plan                                          |
+    # | Build Synchronization Plan                                         |
     # +--------------------------------------------------------------------+
     Write-Progress -Activity "PSSync" -Status "Analyzing source and destination..." -PercentComplete 0
 
@@ -522,15 +537,16 @@ function PSSync
             $WouldUpdateCount = $WouldUpdateCount + 1
         }
 
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    if (-not $ChangesOnly)
-    {
-        Write-Host "WOULD LEAVE ALONE: $RelativePath"
-    }
+        foreach ($RelativePath in $FilesToLeaveAlone)
+        {
+            if (-not $ChangesOnly)
+            {
+                Write-Host "WOULD LEAVE ALONE: $RelativePath"
+            }
 
-    $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
-}
+            $WouldLeaveAloneCount = $WouldLeaveAloneCount + 1
+        }
+
         if ($Mirror)
         {
             foreach ($tmpFile in $FilesToDelete)
@@ -624,15 +640,16 @@ foreach ($RelativePath in $FilesToLeaveAlone)
     # +--------------------------------------------------------------------+
     # | Unchanged Files                                                    |
     # +--------------------------------------------------------------------+
-foreach ($RelativePath in $FilesToLeaveAlone)
-{
-    $UnchangedCount = $UnchangedCount + 1
-
-    if (-not $ChangesOnly)
+    foreach ($RelativePath in $FilesToLeaveAlone)
     {
-        Write-Host "UNCHANGED: $RelativePath"
+        $UnchangedCount = $UnchangedCount + 1
+
+        if (-not $ChangesOnly)
+        {
+            Write-Host "UNCHANGED: $RelativePath"
+        }
     }
-}
+
     # +--------------------------------------------------------------------+
     # | Mirror File Deletion                                               |
     # +--------------------------------------------------------------------+
