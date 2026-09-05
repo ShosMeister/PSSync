@@ -200,4 +200,6 @@ Using GitHub Issues keeps reports organized and avoids requiring a personal emai
 
 
 ## License
-A project license has not yet been specified. Add an appropriate license before presenting the repository as an openly licensed project.
+PSSync is licensed under the MIT License.
+
+See the [LICENSE](LICENSE) file for the complete license text.
