@@ -15,6 +15,8 @@ It synchronizes files and directories from a source tree to a destination tree u
 - Supports '-ChangesOnly' to suppress noisy no-change messages.
 - Displays progress while enumerating and analyzing large directory trees.
 - Detects file/directory conflicts before modifying the destination.
+- Verifies copied and updated files using SHA-256 after transfer.
+- Uses a SHA-256 self-test before synchronization modifies the destination.
 - Reports file-system operation errors and provides a final summary.
 
 
@@ -103,6 +105,8 @@ For each source item:
 6. Destination-only directories are retained unless '-Mirror' is specified.
 7. Mirror directory cleanup is performed from the deepest directory toward the destination root.
 8. File/directory conflicts at the same relative path are detected before synchronization begins.
+9. Files selected for copy or update are verified using SHA-256 after transfer.
+10. The SHA-256 verification mechanism is self-tested before synchronization modifies the destination.
 
 
 ## Progress Reporting
@@ -120,6 +124,30 @@ The progress stages include:
 
 The analysis stage provides a percentage based on the items analyzed relative to the synchronization workload.
 
+
+## File Verification
+PSSync verifies every file that it copies or updates.
+
+The verification process is:
+
+1. A SHA-256 hash is calculated for the source file during synchronization planning.
+2. The source file is copied or updated.
+3. The source file is hashed again after the transfer.
+4. The destination file is hashed.
+5. The transfer is successful only when all three SHA-256 values match.
+
+This protects against a source file changing during the transfer and verifies that
+the destination contents match the source contents that were planned for transfer.
+
+PSSync uses SHA-256, a FIPS-approved hashing algorithm, for verification of files
+transferred during synchronization. PSSync does not use MD5 or SHA-1 for file
+verification.
+
+PSSync performs a SHA-256 self-test before synchronization modifies the destination.
+If the verification mechanism is unavailable or fails the self-test, PSSync stops
+before making synchronization changes.
+
+PSSync does not claim FIPS 140 certification or compliance.
 
 ## Output
 Normal execution reports operations such as:
@@ -152,8 +180,9 @@ Individual file-system operation failures are reported as errors and included in
 ## Limitations
 PSSync currently:
 
-- Uses 'LastWriteTimeUtc' rather than comparing file contents.
-- Does not perform hash-based file comparison.
+- Uses 'LastWriteTimeUtc' to determine whether an existing destination file needs
+  to be transferred. SHA-256 is used to verify files that are transferred.
+- Does not use hashes to determine whether unchanged files need to be transferred.
 - Does not provide file or directory include/exclude filters.
 - Does not provide external logging.
 - Is intended primarily as a straightforward directory synchronization utility rather than a full replacement for mature synchronization tools.
@@ -173,6 +202,8 @@ The project includes a Pester test suite covering the core synchronization behav
 - File/directory conflicts
 - Destination path errors
 - Summary and error handling
+- SHA-256 transfer verification
+- SHA-256 pre-synchronization self-test
 
 Run the tests from the project directory with:
 

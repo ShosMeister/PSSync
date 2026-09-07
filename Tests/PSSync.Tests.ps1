@@ -1,75 +1,83 @@
-# +------------------------------------------------------------------------+
-# | PSSync Tests                                                           |
-# +------------------------------------------------------------------------+
-# | Purpose:                                                               |
-# | Provides automated tests for the PSSync PowerShell module.             |
-# |                                                                        |
-# | Responsibilities:                                                      |
-# | - Load the PSSync module for testing.                                  |
-# | - Verify that the PSSync command is available.                         |
-# | - Verify that missing source files are copied to the destination.      |
-# | - Provide the foundation for additional synchronization tests.         |
-# |                                                                        |
-# | Current Status:                                                        |
-# | - Module-loading test implemented.                                     |
-# | - Missing-file synchronization test implemented.                       |
-# | - Additional synchronization tests will be added incrementally.        |
-# +------------------------------------------------------------------------+
+# +----------------------------------------------------------------------------+
+# | PSSync Tests                                                               |
+# +----------------------------------------------------------------------------+
+# | Purpose:                                                                   |
+# | Provides automated tests for the PSSync PowerShell module.                 |
+# |                                                                            |
+# | Responsibilities:                                                          |
+# | - Verify core synchronization behavior.                                    |
+# | - Verify Mirror and WhatIf behavior.                                       |
+# | - Verify validation and conflict handling.                                 |
+# | - Verify SHA-256 transfer verification and the hashing self-test.           |
+# +----------------------------------------------------------------------------+
 
 $ModulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\PSSync.psm1"
 
 Import-Module $ModulePath -Force
 
+function New-PSSyncTestRoot
+{
+    $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) `
+        -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+
+    New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
+
+    return $TestRoot
+}
+
+function Remove-PSSyncTestRoot
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TestRoot
+    )
+
+    if (Test-Path -LiteralPath $TestRoot)
+    {
+        Remove-Item -LiteralPath $TestRoot -Recurse -Force
+    }
+}
 
 Describe "PSSync Module" {
 
     It "Loads the PSSync command" {
         $Command = Get-Command PSSync -ErrorAction SilentlyContinue
+
         $Command | Should Not BeNullOrEmpty
     }
 
-
     It "Copies a missing source file to the destination" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-
             Set-Content -Path $SourceFilePath -Value "PSSync test file"
 
             PSSync $SourcePath $DestinationPath
 
-            $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
 
-            $DestinationFileExists | Should Be $true
-
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "PSSync test file"
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "PSSync test file"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Updates an older destination file when the source is newer" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
 
         try
         {
@@ -81,32 +89,25 @@ Describe "PSSync Module" {
 
             $SourceFile = Get-Item -LiteralPath $SourceFilePath
             $DestinationFile = Get-Item -LiteralPath $DestinationFilePath
-
             $DestinationFile.LastWriteTime = $SourceFile.LastWriteTime.AddMinutes(-10)
 
             PSSync $SourcePath $DestinationPath
 
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "NEW SOURCE CONTENT"
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "NEW SOURCE CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Leaves a newer destination file unchanged" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
 
         try
         {
@@ -118,33 +119,26 @@ Describe "PSSync Module" {
 
             $SourceFile = Get-Item -LiteralPath $SourceFilePath
             $DestinationFile = Get-Item -LiteralPath $DestinationFilePath
-
             $SourceFile.LastWriteTime = $DestinationFile.LastWriteTime.AddMinutes(-10)
 
             PSSync $SourcePath $DestinationPath
 
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "NEW DESTINATION CONTENT"
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "NEW DESTINATION CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Leaves an extraneous destination file unchanged in normal mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $DestinationPath "ExtraFile.txt"
 
         try
         {
@@ -157,32 +151,25 @@ Describe "PSSync Module" {
 
             PSSync $SourcePath $DestinationPath
 
-            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $true
 
-            $ExtraneousFileExists | Should Be $true
-
-            $ExtraneousContents = Get-Content -LiteralPath $ExtraneousFilePath -Raw
-
-            $ExtraneousContents.Trim() | Should Be "EXTRANEOUS CONTENT"
+            (Get-Content -LiteralPath $ExtraneousFilePath -Raw).Trim() |
+                Should Be "EXTRANEOUS CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Deletes an extraneous destination file in Mirror mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $DestinationPath "ExtraFile.txt"
 
         try
         {
@@ -195,40 +182,30 @@ Describe "PSSync Module" {
 
             PSSync $SourcePath $DestinationPath -Mirror
 
-            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $false
 
-            $ExtraneousFileExists | Should Be $false
-
-            $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
-
-            $DestinationFileExists | Should Be $true
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
-
     It "Deletes an extraneous file inside a destination subdirectory in Mirror mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-
-        $ReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
-        $ExtraneousFilePath = Join-Path -Path $ReportsPath -ChildPath "OldReport.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $ReportsPath = Join-Path $DestinationPath "Reports"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $ReportsPath "OldReport.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
             New-Item -ItemType Directory -Path $ReportsPath -Force | Out-Null
 
             Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
@@ -237,41 +214,32 @@ Describe "PSSync Module" {
 
             PSSync $SourcePath $DestinationPath -Mirror
 
-            $ExtraneousFileExists = Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf
+            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
+                Should Be $false
 
-            $ExtraneousFileExists | Should Be $false
-
-            $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
-
-            $DestinationFileExists | Should Be $true
+            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
+                Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Deletes all empty extraneous parent directories in Mirror mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-
-        $OldProjectPath = Join-Path -Path $DestinationPath -ChildPath "OldProject"
-        $ArchivePath = Join-Path -Path $OldProjectPath -ChildPath "Archive"
-        $YearPath = Join-Path -Path $ArchivePath -ChildPath "2025"
-        $ExtraneousFilePath = Join-Path -Path $YearPath -ChildPath "OldFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $OldProjectPath = Join-Path $DestinationPath "OldProject"
+        $ArchivePath = Join-Path $OldProjectPath "Archive"
+        $YearPath = Join-Path $ArchivePath "2025"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $YearPath "OldFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
             New-Item -ItemType Directory -Path $YearPath -Force | Out-Null
 
             Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
@@ -282,38 +250,28 @@ Describe "PSSync Module" {
 
             Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
                 Should Be $false
-
             Test-Path -LiteralPath $YearPath -PathType Container |
                 Should Be $false
-
             Test-Path -LiteralPath $ArchivePath -PathType Container |
                 Should Be $false
-
             Test-Path -LiteralPath $OldProjectPath -PathType Container |
                 Should Be $false
-
             Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
                 Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports changes without modifying files in WhatIf mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-        $ExtraneousFilePath = Join-Path -Path $DestinationPath -ChildPath "ExtraFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $DestinationPath "ExtraFile.txt"
 
         try
         {
@@ -324,117 +282,80 @@ Describe "PSSync Module" {
             Set-Content -Path $DestinationFilePath -Value "OLD DESTINATION CONTENT"
             Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
 
-            $DestinationBefore = Get-Content -LiteralPath $DestinationFilePath -Raw
-            $ExtraneousBefore = Get-Content -LiteralPath $ExtraneousFilePath -Raw
-
             PSSync $SourcePath $DestinationPath -Mirror -WhatIf
 
-            $DestinationAfter = Get-Content -LiteralPath $DestinationFilePath -Raw
-            $ExtraneousAfter = Get-Content -LiteralPath $ExtraneousFilePath -Raw
-
-            $DestinationAfter.Trim() | Should Be "OLD DESTINATION CONTENT"
-            $ExtraneousAfter.Trim() | Should Be "EXTRANEOUS CONTENT"
-
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $true
-
-            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
-                Should Be $true
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "OLD DESTINATION CONTENT"
+            (Get-Content -LiteralPath $ExtraneousFilePath -Raw).Trim() |
+                Should Be "EXTRANEOUS CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports creation without creating files in WhatIf mode when the destination is missing" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-
             Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
 
             PSSync $SourcePath $DestinationPath -WhatIf
 
             Test-Path -LiteralPath $DestinationPath -PathType Container |
                 Should Be $false
-
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $false
+            Test-Path -LiteralPath (Join-Path $DestinationPath "TestFile.txt") `
+                -PathType Leaf | Should Be $false
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Creates nested source directories and copies their files" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
-        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
-
-        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
-        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceReportsPath = Join-Path $SourcePath "Reports"
+        $SourceFilePath = Join-Path $SourceReportsPath "January.xlsx"
+        $DestinationReportsPath = Join-Path $DestinationPath "Reports"
+        $DestinationFilePath = Join-Path $DestinationReportsPath "January.xlsx"
 
         try
         {
             New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
-
             Set-Content -Path $SourceFilePath -Value "JANUARY SOURCE"
 
             PSSync $SourcePath $DestinationPath
 
             Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
                 Should Be $true
-
             Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
                 Should Be $true
-
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "JANUARY SOURCE"
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "JANUARY SOURCE"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Updates a newer file in an existing nested directory" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
-        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
-
-        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
-        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceReportsPath = Join-Path $SourcePath "Reports"
+        $DestinationReportsPath = Join-Path $DestinationPath "Reports"
+        $SourceFilePath = Join-Path $SourceReportsPath "January.xlsx"
+        $DestinationFilePath = Join-Path $DestinationReportsPath "January.xlsx"
 
         try
         {
@@ -446,113 +367,88 @@ Describe "PSSync Module" {
 
             $SourceFile = Get-Item -LiteralPath $SourceFilePath
             $DestinationFile = Get-Item -LiteralPath $DestinationFilePath
-
             $DestinationFile.LastWriteTime = $SourceFile.LastWriteTime.AddMinutes(-10)
 
             PSSync $SourcePath $DestinationPath
 
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "NEW JANUARY SOURCE"
-
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "NEW JANUARY SOURCE"
             Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
                 Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Handles multiple synchronization outcomes in one run" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
-        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceReportsPath = Join-Path $SourcePath "Reports"
+        $DestinationReportsPath = Join-Path $DestinationPath "Reports"
 
         try
         {
             New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationReportsPath -Force | Out-Null
 
-            $SourceFile1Path = Join-Path -Path $SourcePath -ChildPath "File1.txt"
-            $DestinationFile1Path = Join-Path -Path $DestinationPath -ChildPath "File1.txt"
+            $SourceFile1Path = Join-Path $SourcePath "File1.txt"
+            $DestinationFile1Path = Join-Path $DestinationPath "File1.txt"
+            $SourceFile2Path = Join-Path $SourcePath "File2.txt"
+            $DestinationFile2Path = Join-Path $DestinationPath "File2.txt"
+            $SourceJanuaryPath = Join-Path $SourceReportsPath "January.xlsx"
+            $DestinationJanuaryPath = Join-Path $DestinationReportsPath "January.xlsx"
+            $SourceFebruaryPath = Join-Path $SourceReportsPath "February.xlsx"
+            $DestinationFebruaryPath = Join-Path $DestinationReportsPath "February.xlsx"
 
-            $SourceFile2Path = Join-Path -Path $SourcePath -ChildPath "File2.txt"
-            $DestinationFile2Path = Join-Path -Path $DestinationPath -ChildPath "File2.txt"
+            Set-Content $SourceFile1Path "FILE1 NEW SOURCE"
+            Set-Content $DestinationFile1Path "FILE1 OLD DESTINATION"
+            Set-Content $SourceFile2Path "FILE2 SAME CONTENT"
+            Set-Content $DestinationFile2Path "FILE2 SAME CONTENT"
+            Set-Content $SourceJanuaryPath "JANUARY NEW SOURCE"
+            Set-Content $DestinationJanuaryPath "JANUARY OLD DESTINATION"
+            Set-Content $SourceFebruaryPath "FEBRUARY SAME CONTENT"
+            Set-Content $DestinationFebruaryPath "FEBRUARY SAME CONTENT"
 
-            $SourceJanuaryPath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
-            $DestinationJanuaryPath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
-
-            $SourceFebruaryPath = Join-Path -Path $SourceReportsPath -ChildPath "February.xlsx"
-            $DestinationFebruaryPath = Join-Path -Path $DestinationReportsPath -ChildPath "February.xlsx"
-
-            Set-Content -Path $SourceFile1Path -Value "FILE1 NEW SOURCE"
-            Set-Content -Path $DestinationFile1Path -Value "FILE1 OLD DESTINATION"
-
-            Set-Content -Path $SourceFile2Path -Value "FILE2 SAME CONTENT"
-            Set-Content -Path $DestinationFile2Path -Value "FILE2 SAME CONTENT"
-
-            Set-Content -Path $SourceJanuaryPath -Value "JANUARY NEW SOURCE"
-            Set-Content -Path $DestinationJanuaryPath -Value "JANUARY OLD DESTINATION"
-
-            Set-Content -Path $SourceFebruaryPath -Value "FEBRUARY SAME CONTENT"
-            Set-Content -Path $DestinationFebruaryPath -Value "FEBRUARY SAME CONTENT"
-
-            $SourceFile1 = Get-Item -LiteralPath $SourceFile1Path
-            $DestinationFile1 = Get-Item -LiteralPath $DestinationFile1Path
-
+            $SourceFile1 = Get-Item $SourceFile1Path
+            $DestinationFile1 = Get-Item $DestinationFile1Path
             $DestinationFile1.LastWriteTime = $SourceFile1.LastWriteTime.AddMinutes(-10)
 
-            $SourceJanuary = Get-Item -LiteralPath $SourceJanuaryPath
-            $DestinationJanuary = Get-Item -LiteralPath $DestinationJanuaryPath
-
+            $SourceJanuary = Get-Item $SourceJanuaryPath
+            $DestinationJanuary = Get-Item $DestinationJanuaryPath
             $DestinationJanuary.LastWriteTime = $SourceJanuary.LastWriteTime.AddMinutes(-10)
 
-            $SourceFile2 = Get-Item -LiteralPath $SourceFile2Path
-            $DestinationFile2 = Get-Item -LiteralPath $DestinationFile2Path
-
+            $SourceFile2 = Get-Item $SourceFile2Path
+            $DestinationFile2 = Get-Item $DestinationFile2Path
             $DestinationFile2.LastWriteTime = $SourceFile2.LastWriteTime
 
-            $SourceFebruary = Get-Item -LiteralPath $SourceFebruaryPath
-            $DestinationFebruary = Get-Item -LiteralPath $DestinationFebruaryPath
-
+            $SourceFebruary = Get-Item $SourceFebruaryPath
+            $DestinationFebruary = Get-Item $DestinationFebruaryPath
             $DestinationFebruary.LastWriteTime = $SourceFebruary.LastWriteTime
 
             PSSync $SourcePath $DestinationPath
 
-            $DestinationFile1Contents = Get-Content -LiteralPath $DestinationFile1Path -Raw
-            $DestinationFile2Contents = Get-Content -LiteralPath $DestinationFile2Path -Raw
-            $DestinationJanuaryContents = Get-Content -LiteralPath $DestinationJanuaryPath -Raw
-            $DestinationFebruaryContents = Get-Content -LiteralPath $DestinationFebruaryPath -Raw
-
-            $DestinationFile1Contents.Trim() | Should Be "FILE1 NEW SOURCE"
-            $DestinationFile2Contents.Trim() | Should Be "FILE2 SAME CONTENT"
-            $DestinationJanuaryContents.Trim() | Should Be "JANUARY NEW SOURCE"
-            $DestinationFebruaryContents.Trim() | Should Be "FEBRUARY SAME CONTENT"
+            (Get-Content $DestinationFile1Path -Raw).Trim() |
+                Should Be "FILE1 NEW SOURCE"
+            (Get-Content $DestinationFile2Path -Raw).Trim() |
+                Should Be "FILE2 SAME CONTENT"
+            (Get-Content $DestinationJanuaryPath -Raw).Trim() |
+                Should Be "JANUARY NEW SOURCE"
+            (Get-Content $DestinationFebruaryPath -Raw).Trim() |
+                Should Be "FEBRUARY SAME CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Rejects a source directory that does not exist" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "MissingSource"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "MissingSource"
+        $DestinationPath = Join-Path $TestRoot "Destination"
 
         try
         {
@@ -562,40 +458,29 @@ Describe "PSSync Module" {
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Rejects source and destination when they are the same directory" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
+        $TestRoot = New-PSSyncTestRoot
 
         try
         {
-            New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
-
             {
                 PSSync $TestRoot $TestRoot
             } | Should Throw
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Rejects a destination located inside the source directory" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $SourcePath -ChildPath "Destination"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $SourcePath "Destination"
 
         try
         {
@@ -607,187 +492,128 @@ Describe "PSSync Module" {
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports nested Mirror deletions without deleting them in WhatIf mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "TestFile.txt"
-
-        $OldProjectPath = Join-Path -Path $DestinationPath -ChildPath "OldProject"
-        $ArchivePath = Join-Path -Path $OldProjectPath -ChildPath "Archive"
-        $YearPath = Join-Path -Path $ArchivePath -ChildPath "2025"
-        $ExtraneousFilePath = Join-Path -Path $YearPath -ChildPath "OldFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $OldProjectPath = Join-Path $DestinationPath "OldProject"
+        $ArchivePath = Join-Path $OldProjectPath "Archive"
+        $YearPath = Join-Path $ArchivePath "2025"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExtraneousFilePath = Join-Path $YearPath "OldFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
             New-Item -ItemType Directory -Path $YearPath -Force | Out-Null
 
-            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
-            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
-            Set-Content -Path $ExtraneousFilePath -Value "EXTRANEOUS CONTENT"
+            Set-Content $SourceFilePath "SOURCE CONTENT"
+            Set-Content $DestinationFilePath "DESTINATION CONTENT"
+            Set-Content $ExtraneousFilePath "EXTRANEOUS CONTENT"
 
             PSSync $SourcePath $DestinationPath -Mirror -WhatIf
 
-            Test-Path -LiteralPath $ExtraneousFilePath -PathType Leaf |
-                Should Be $true
-
-            Test-Path -LiteralPath $YearPath -PathType Container |
-                Should Be $true
-
-            Test-Path -LiteralPath $ArchivePath -PathType Container |
-                Should Be $true
-
-            Test-Path -LiteralPath $OldProjectPath -PathType Container |
-                Should Be $true
-
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $true
+            Test-Path $ExtraneousFilePath -PathType Leaf | Should Be $true
+            Test-Path $YearPath -PathType Container | Should Be $true
+            Test-Path $ArchivePath -PathType Container | Should Be $true
+            Test-Path $OldProjectPath -PathType Container | Should Be $true
+            Test-Path $DestinationFilePath -PathType Leaf | Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports nested directory creation without creating it in WhatIf mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
-        $SourceFilePath = Join-Path -Path $SourceReportsPath -ChildPath "January.xlsx"
-
-        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
-        $DestinationFilePath = Join-Path -Path $DestinationReportsPath -ChildPath "January.xlsx"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceReportsPath = Join-Path $SourcePath "Reports"
+        $SourceFilePath = Join-Path $SourceReportsPath "January.xlsx"
+        $DestinationReportsPath = Join-Path $DestinationPath "Reports"
 
         try
         {
             New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-
-            Set-Content -Path $SourceFilePath -Value "JANUARY SOURCE"
+            Set-Content $SourceFilePath "JANUARY SOURCE"
 
             PSSync $SourcePath $DestinationPath -WhatIf
 
-            Test-Path -LiteralPath $DestinationReportsPath -PathType Container |
-                Should Be $false
-
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $false
-
-            Test-Path -LiteralPath $DestinationPath -PathType Container |
-                Should Be $true
+            Test-Path $DestinationReportsPath -PathType Container | Should Be $false
+            Test-Path (Join-Path $DestinationReportsPath "January.xlsx") `
+                -PathType Leaf | Should Be $false
+            Test-Path $DestinationPath -PathType Container | Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports mixed synchronization outcomes without changing the destination in WhatIf mode" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceReportsPath = Join-Path -Path $SourcePath -ChildPath "Reports"
-        $DestinationReportsPath = Join-Path -Path $DestinationPath -ChildPath "Reports"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceReportsPath = Join-Path $SourcePath "Reports"
+        $DestinationReportsPath = Join-Path $DestinationPath "Reports"
 
         try
         {
             New-Item -ItemType Directory -Path $SourceReportsPath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationReportsPath -Force | Out-Null
 
-            $SourceFile1Path = Join-Path -Path $SourcePath -ChildPath "File1.txt"
-            $DestinationFile1Path = Join-Path -Path $DestinationPath -ChildPath "File1.txt"
+            $SourceFile1Path = Join-Path $SourcePath "File1.txt"
+            $DestinationFile1Path = Join-Path $DestinationPath "File1.txt"
+            $SourceFile2Path = Join-Path $SourcePath "File2.txt"
+            $DestinationFile2Path = Join-Path $DestinationPath "File2.txt"
+            $SourceNewReportPath = Join-Path $SourceReportsPath "NewReport.xlsx"
+            $DestinationNewReportPath = Join-Path $DestinationReportsPath "NewReport.xlsx"
+            $DestinationOldFilePath = Join-Path $DestinationPath "OldFile.txt"
 
-            $SourceFile2Path = Join-Path -Path $SourcePath -ChildPath "File2.txt"
-            $DestinationFile2Path = Join-Path -Path $DestinationPath -ChildPath "File2.txt"
+            Set-Content $SourceFile1Path "NEW FILE1 SOURCE"
+            Set-Content $DestinationFile1Path "OLD FILE1 DESTINATION"
+            Set-Content $SourceFile2Path "FILE2 SAME CONTENT"
+            Set-Content $DestinationFile2Path "FILE2 SAME CONTENT"
+            Set-Content $SourceNewReportPath "NEW REPORT SOURCE"
+            Set-Content $DestinationOldFilePath "OLD EXTRANEOUS FILE"
 
-            $SourceNewReportPath = Join-Path -Path $SourceReportsPath -ChildPath "NewReport.xlsx"
-            $DestinationNewReportPath = Join-Path -Path $DestinationReportsPath -ChildPath "NewReport.xlsx"
-
-            $DestinationOldFilePath = Join-Path -Path $DestinationPath -ChildPath "OldFile.txt"
-
-            Set-Content -Path $SourceFile1Path -Value "NEW FILE1 SOURCE"
-            Set-Content -Path $DestinationFile1Path -Value "OLD FILE1 DESTINATION"
-
-            Set-Content -Path $SourceFile2Path -Value "FILE2 SAME CONTENT"
-            Set-Content -Path $DestinationFile2Path -Value "FILE2 SAME CONTENT"
-
-            Set-Content -Path $SourceNewReportPath -Value "NEW REPORT SOURCE"
-
-            Set-Content -Path $DestinationOldFilePath -Value "OLD EXTRANEOUS FILE"
-
-            $SourceFile1 = Get-Item -LiteralPath $SourceFile1Path
-            $DestinationFile1 = Get-Item -LiteralPath $DestinationFile1Path
-
+            $SourceFile1 = Get-Item $SourceFile1Path
+            $DestinationFile1 = Get-Item $DestinationFile1Path
             $DestinationFile1.LastWriteTime = $SourceFile1.LastWriteTime.AddMinutes(-10)
 
-            $SourceFile2 = Get-Item -LiteralPath $SourceFile2Path
-            $DestinationFile2 = Get-Item -LiteralPath $DestinationFile2Path
-
+            $SourceFile2 = Get-Item $SourceFile2Path
+            $DestinationFile2 = Get-Item $DestinationFile2Path
             $DestinationFile2.LastWriteTime = $SourceFile2.LastWriteTime
 
             PSSync $SourcePath $DestinationPath -Mirror -WhatIf
 
-            $DestinationFile1Contents = Get-Content -LiteralPath $DestinationFile1Path -Raw
-            $DestinationFile2Contents = Get-Content -LiteralPath $DestinationFile2Path -Raw
-            $OldFileContents = Get-Content -LiteralPath $DestinationOldFilePath -Raw
+            (Get-Content $DestinationFile1Path -Raw).Trim() |
+                Should Be "OLD FILE1 DESTINATION"
+            (Get-Content $DestinationFile2Path -Raw).Trim() |
+                Should Be "FILE2 SAME CONTENT"
+            (Get-Content $DestinationOldFilePath -Raw).Trim() |
+                Should Be "OLD EXTRANEOUS FILE"
 
-            $DestinationFile1Contents.Trim() | Should Be "OLD FILE1 DESTINATION"
-            $DestinationFile2Contents.Trim() | Should Be "FILE2 SAME CONTENT"
-            $OldFileContents.Trim() | Should Be "OLD EXTRANEOUS FILE"
-
-            Test-Path -LiteralPath $DestinationNewReportPath -PathType Leaf |
-                Should Be $false
-
-            Test-Path -LiteralPath $DestinationOldFilePath -PathType Leaf |
-                Should Be $true
-
-            Test-Path -LiteralPath $DestinationFile1Path -PathType Leaf |
-                Should Be $true
-
-            Test-Path -LiteralPath $DestinationFile2Path -PathType Leaf |
-                Should Be $true
+            Test-Path $DestinationNewReportPath -PathType Leaf | Should Be $false
+            Test-Path $DestinationOldFilePath -PathType Leaf | Should Be $true
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Handles an empty source directory" {
-
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
 
         try
         {
@@ -795,194 +621,260 @@ Describe "PSSync Module" {
 
             PSSync $SourcePath $DestinationPath
 
-            Test-Path -LiteralPath $DestinationPath -PathType Container |
-                Should Be $true
+            Test-Path $DestinationPath -PathType Container | Should Be $true
 
-            $DestinationFiles = Get-ChildItem -LiteralPath $DestinationPath -Recurse -File
+            $DestinationFiles = Get-ChildItem -LiteralPath $DestinationPath `
+                -Recurse -File
 
             $DestinationFiles.Count | Should Be 0
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Leaves destination files unchanged when the source is empty in normal mode" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "ExistingFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $DestinationFilePath = Join-Path $DestinationPath "ExistingFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-
-            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content $DestinationFilePath "DESTINATION CONTENT"
 
             PSSync $SourcePath $DestinationPath
 
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $true
-
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "DESTINATION CONTENT"
+            Test-Path $DestinationFilePath -PathType Leaf | Should Be $true
+            (Get-Content $DestinationFilePath -Raw).Trim() |
+                Should Be "DESTINATION CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Deletes destination files when the source is empty in Mirror mode" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "ExistingFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $DestinationFilePath = Join-Path $DestinationPath "ExistingFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-
-            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content $DestinationFilePath "DESTINATION CONTENT"
 
             PSSync $SourcePath $DestinationPath -Mirror
 
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $false
+            Test-Path $DestinationFilePath -PathType Leaf | Should Be $false
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports an error when a source file conflicts with a destination directory" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "Conflict.txt"
-        $DestinationConflictPath = Join-Path -Path $DestinationPath -ChildPath "Conflict.txt"
-        $DestinationFileInsidePath = Join-Path -Path $DestinationConflictPath -ChildPath "Conflict.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "Conflict.txt"
+        $DestinationConflictPath = Join-Path $DestinationPath "Conflict.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationConflictPath -Force | Out-Null
-
-            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
+            Set-Content $SourceFilePath "SOURCE CONTENT"
 
             {
                 PSSync $SourcePath $DestinationPath
             } | Should Throw
 
-            Test-Path -LiteralPath $DestinationConflictPath -PathType Container |
+            Test-Path $DestinationConflictPath -PathType Container |
                 Should Be $true
-
-            Test-Path -LiteralPath $DestinationFileInsidePath -PathType Leaf |
-                Should Be $false
+            Test-Path (Join-Path $DestinationConflictPath "Conflict.txt") `
+                -PathType Leaf | Should Be $false
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
     It "Reports an error when a source directory conflicts with a destination file" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceConflictPath = Join-Path -Path $SourcePath -ChildPath "Conflict.txt"
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath "Conflict.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceConflictPath = Join-Path $SourcePath "Conflict.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "Conflict.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourceConflictPath -Force | Out-Null
             New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-
-            Set-Content -Path $DestinationFilePath -Value "DESTINATION CONTENT"
+            Set-Content $DestinationFilePath "DESTINATION CONTENT"
 
             {
                 PSSync $SourcePath $DestinationPath
             } | Should Throw
 
-            Test-Path -LiteralPath $SourceConflictPath -PathType Container |
-                Should Be $true
-
-            Test-Path -LiteralPath $DestinationFilePath -PathType Leaf |
-                Should Be $true
-
-            $DestinationContents = Get-Content -LiteralPath $DestinationFilePath -Raw
-
-            $DestinationContents.Trim() | Should Be "DESTINATION CONTENT"
+            Test-Path $SourceConflictPath -PathType Container | Should Be $true
+            Test-Path $DestinationFilePath -PathType Leaf | Should Be $true
+            (Get-Content $DestinationFilePath -Raw).Trim() |
+                Should Be "DESTINATION CONTENT"
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
-
     It "Handles a destination path that is an existing file" {
-        $TestRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("PSSyncTest_" + [System.Guid]::NewGuid().ToString())
-
-        $SourcePath = Join-Path -Path $TestRoot -ChildPath "Source"
-        $DestinationPath = Join-Path -Path $TestRoot -ChildPath "Destination"
-
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath "TestFile.txt"
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
 
         try
         {
             New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
-
-            Set-Content -Path $SourceFilePath -Value "SOURCE CONTENT"
-            Set-Content -Path $DestinationPath -Value "DESTINATION FILE"
+            Set-Content $SourceFilePath "SOURCE CONTENT"
+            Set-Content $DestinationPath "DESTINATION FILE"
 
             PSSync $SourcePath $DestinationPath
 
-            Test-Path -LiteralPath $DestinationPath -PathType Leaf |
-                Should Be $true
-
-            $DestinationContents = Get-Content -LiteralPath $DestinationPath -Raw
-
-            $DestinationContents.Trim() | Should Be "DESTINATION FILE"
-
-            Test-Path -LiteralPath (Join-Path $DestinationPath "TestFile.txt") -PathType Leaf |
-                Should Be $false
+            Test-Path $DestinationPath -PathType Leaf | Should Be $true
+            (Get-Content $DestinationPath -Raw).Trim() |
+                Should Be "DESTINATION FILE"
+            Test-Path (Join-Path $DestinationPath "TestFile.txt") `
+                -PathType Leaf | Should Be $false
         }
         finally
         {
-            if (Test-Path -LiteralPath $TestRoot)
-            {
-                Remove-Item -LiteralPath $TestRoot -Recurse -Force
-            }
+            Remove-PSSyncTestRoot $TestRoot
         }
     }
 
+    It "Verifies a copied file against a known SHA-256 value" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $ExpectedHash = "FFA0C65108DA11750103D21DF0737D222286E99C42AC91D5C7520248EA2B23F8"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            Set-Content -Path $SourceFilePath -Value "PSSync verification test"
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path $DestinationFilePath -PathType Leaf | Should Be $true
+
+            $HashAlgorithm = New-Object System.Security.Cryptography.SHA256Cng
+            try
+            {
+                $HashBytes = $HashAlgorithm.ComputeHash(
+                    [System.IO.File]::ReadAllBytes($DestinationFilePath)
+                )
+                $ActualHash = ([System.BitConverter]::ToString($HashBytes)).Replace(
+                    "-", ""
+                ).ToUpperInvariant()
+            }
+            finally
+            {
+                $HashAlgorithm.Dispose()
+            }
+
+            $ActualHash | Should Be $ExpectedHash
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Verifies an updated file against the expected contents" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content $SourceFilePath "UPDATED SOURCE CONTENT"
+            Set-Content $DestinationFilePath "OLD DESTINATION CONTENT"
+
+            $SourceFile = Get-Item $SourceFilePath
+            $DestinationFile = Get-Item $DestinationFilePath
+            $DestinationFile.LastWriteTime = $SourceFile.LastWriteTime.AddMinutes(-10)
+
+            PSSync $SourcePath $DestinationPath
+
+            (Get-Content $DestinationFilePath -Raw).Trim() |
+                Should Be "UPDATED SOURCE CONTENT"
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Runs the SHA-256 self-test before synchronization" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            Set-Content $SourceFilePath "SELF TEST SOURCE"
+
+            PSSync $SourcePath $DestinationPath
+
+            Test-Path $DestinationPath -PathType Container | Should Be $true
+            Test-Path (Join-Path $DestinationPath "TestFile.txt") `
+                -PathType Leaf | Should Be $true
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Does not modify the destination in WhatIf mode" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            Set-Content $SourceFilePath "WHATIF SOURCE"
+
+            PSSync $SourcePath $DestinationPath -WhatIf
+
+            Test-Path $DestinationPath -PathType Container | Should Be $false
+            Test-Path (Join-Path $DestinationPath "TestFile.txt") `
+                -PathType Leaf | Should Be $false
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
 }

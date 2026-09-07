@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/PSSync - Copy.psm1
+/PSSync-1.1.0.psm1
+/PSSync-1.1.0-column80.psm1
+/Tests/PSSync-1.1.0-Verification.Tests.ps1
+/PSSync-1.1.0-FIPS-SHA256.psm1
+/Tests/PSSync.Tests - Copy.ps1
