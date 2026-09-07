@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Solution Items/">
+    <File Path="PSScriptAnalyzerSettings.psd1" />
     <File Path="PSSync.psm1" />
   </Folder>
   <Folder Name="/Solution Items/Tests/">

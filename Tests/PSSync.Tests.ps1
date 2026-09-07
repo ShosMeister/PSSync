@@ -8,7 +8,7 @@
 # | - Verify core synchronization behavior.                                    |
 # | - Verify Mirror and WhatIf behavior.                                       |
 # | - Verify validation and conflict handling.                                 |
-# | - Verify SHA-256 transfer verification and the hashing self-test.           |
+# | - Verify SHA-256 transfer verification and the hashing self-test.          |
 # +----------------------------------------------------------------------------+
 
 $ModulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\PSSync.psm1"

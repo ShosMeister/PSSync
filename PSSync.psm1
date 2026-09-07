@@ -1,4 +1,4 @@
-﻿# +----------------------------------------------------------------------------+
+# +----------------------------------------------------------------------------+
 # | PSSync                                                                     |
 # +----------------------------------------------------------------------------+
 # | Purpose:                                                                   |
@@ -88,7 +88,7 @@ Set-StrictMode -Version Latest
 # | Error Handling:                                                            |
 # | Generates a terminating error if FilePath is not located beneath           |
 # | SourcePath.                                                                |
-# |                                                                            |
+#                                                                          |
 # | Limitations:                                                               |
 # | - SourcePath and FilePath must belong to the same file-system tree.        |
 # +----------------------------------------------------------------------------+
@@ -119,7 +119,7 @@ function Get-PSSyncRelativePath
 # +----------------------------------------------------------------------------+
 # | Purpose:                                                                   |
 # | Calculates the SHA-256 hash of a file using the Windows CNG-backed         |
-# | SHA256Cng implementation provided by the .NET Framework.                   |
+# | SHA256Cng implementation provided by the .NET Framework.                  |
 # |                                                                            |
 # | Responsibilities:                                                          |
 # | - Open the specified file for read access.                                 |
@@ -128,13 +128,13 @@ function Get-PSSyncRelativePath
 # |                                                                            |
 # | Inputs:                                                                    |
 # | FilePath As String                                                         |
-# | - The full path of the file to hash.                                       |
+# | - The full path of the file to hash.                                      |
 # |                                                                            |
 # | Outputs:                                                                   |
 # | Returns the SHA-256 hash as a hexadecimal string.                          |
 # |                                                                            |
 # | State Changes:                                                             |
-# | - Does not modify the source file.                                         |
+# | - Does not modify the source file.                                        |
 # |                                                                            |
 # | Usage:                                                                     |
 # | $Hash = Get-PSSyncFileHash $FilePath                                       |
@@ -144,7 +144,7 @@ function Get-PSSyncRelativePath
 # |                                                                            |
 # | Limitations:                                                               |
 # | - Requires the Windows CNG SHA-256 implementation available to .NET        |
-# |   Framework on supported Windows hosts.                                    |
+# |   Framework on supported Windows hosts.                                   |
 # +----------------------------------------------------------------------------+
 function Get-PSSyncFileHash
 {
@@ -172,12 +172,17 @@ function Get-PSSyncFileHash
     }
     finally
     {
-        if ($HashAlgorithm -ne $null)
+        # PowerShell comparison note:
+        # $null is intentionally placed on the left side of these comparisons.
+        # This avoids collection comparison behavior and is the recommended
+        # PowerShell form, even though traditional coding practice often puts
+        # the known value on the left.
+        if ($null -ne $HashAlgorithm)
         {
             $HashAlgorithm.Dispose()
         }
 
-        if ($FileStream -ne $null)
+        if ($null -ne $FileStream)
         {
             $FileStream.Dispose()
         }
@@ -186,18 +191,18 @@ function Get-PSSyncFileHash
 
 
 # +----------------------------------------------------------------------------+
-# | Test-PSSyncHashing                                                         |
+# | Test-PSSyncHashing                                                        |
 # +----------------------------------------------------------------------------+
 # | Purpose:                                                                   |
 # | Verifies that PSSync's SHA-256 hashing mechanism is available and          |
-# | produces the expected result before synchronization modifies the           |
-# | destination.                                                               |
+# | produces the expected result before synchronization modifies the          |
+# | destination.                                                              |
 # |                                                                            |
 # | Responsibilities:                                                          |
-# | - Create a temporary test file.                                            |
+# | - Create a temporary test file.                                           |
 # | - Hash known test data using the same helper used for synchronization.     |
 # | - Compare the result to the known SHA-256 value.                           |
-# | - Remove the temporary test file.                                          |
+# | - Remove the temporary test file.                                         |
 # |                                                                            |
 # | Inputs:                                                                    |
 # | - None.                                                                    |
@@ -372,12 +377,12 @@ function Copy-PSSyncFile
     }
     finally
     {
-        if ($DestinationStream -ne $null)
+        if ($null -ne $DestinationStream)
         {
             $DestinationStream.Dispose()
         }
 
-        if ($SourceStream -ne $null)
+        if ($null -ne $SourceStream)
         {
             $SourceStream.Dispose()
         }
@@ -481,7 +486,48 @@ function Copy-PSSyncFile
 # +----------------------------------------------------------------------------+
 function PSSync
 {
-    [CmdletBinding(SupportsShouldProcess)]
+    <#
+    .SYNOPSIS
+    Synchronizes files and directories from a source directory to a destination directory.
+
+    .DESCRIPTION
+    PSSync synchronizes missing and newer source files to a destination directory.
+    It can optionally remove destination-only files and directories with -Mirror.
+
+    PSSync uses LastWriteTimeUtc to determine whether an existing destination file
+    needs to be transferred. Files that are copied or updated are verified using
+    SHA-256 after transfer.
+
+    .PARAMETER Source
+    The source directory to synchronize.
+
+    .PARAMETER Destination
+    The destination directory to synchronize.
+
+    .PARAMETER Mirror
+    Removes destination-only files and directories.
+
+    .PARAMETER ChangesOnly
+    Suppresses per-item messages for files that require no action.
+
+    .EXAMPLE
+    PSSync "C:\Source" "D:\Destination"
+
+    .EXAMPLE
+    PSSync "C:\Source" "D:\Destination" -Mirror
+
+    .EXAMPLE
+    PSSync "C:\Source" "D:\Destination" -Mirror -WhatIf
+
+    .EXAMPLE
+    PSSync "C:\Source" "D:\Destination" -ChangesOnly
+
+    .NOTES
+    PSSync performs a SHA-256 self-test before synchronization modifies the
+    destination. PSSync does not claim FIPS 140 certification or compliance.
+    #>
+
+   [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory = $true, Position = 0)]
         [string]$Source,
@@ -939,7 +985,7 @@ function PSSync
 
         try
         {
-            $Verified = Copy-PSSyncFile $tmpFile.SourceFile $DestinationFilePath $tmpFile.SourceHash "Copying"
+            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $DestinationFilePath -ExpectedSourceHash $tmpFile.SourceHash -Operation "Copying"
 
             if ($Verified)
             {
@@ -970,7 +1016,7 @@ function PSSync
     {
         try
         {
-            $Verified = Copy-PSSyncFile $tmpFile.SourceFile $tmpFile.DestinationFilePath $tmpFile.SourceHash "Updating"
+            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $tmpFile.DestinationFilePath -ExpectedSourceHash $tmpFile.SourceHash -Operation "Updating"
 
             if ($Verified)
             {
