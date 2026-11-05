@@ -108,6 +108,8 @@ For each source item:
 8. File/directory conflicts at the same relative path are detected before synchronization begins.
 9. Files selected for copy or update are verified using SHA-256 after transfer.
 10. The SHA-256 verification mechanism is self-tested before synchronization modifies the destination.
+11. After a successful verified copy or update, the destination file's `CreationTimeUtc` and `LastWriteTimeUtc` are set to the corresponding source timestamps.
+12. Files that do not need to be transferred are left untouched, including their destination timestamps.
 
 
 ## Progress Reporting
