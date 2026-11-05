@@ -16,6 +16,7 @@ It synchronizes files and directories from a source tree to a destination tree u
 - Displays progress while enumerating and analyzing large directory trees.
 - Detects file/directory conflicts before modifying the destination.
 - Verifies copied and updated files using SHA-256 after transfer.
+- Preserves source file creation and last-write timestamps after a successful verified transfer.
 - Uses a SHA-256 self-test before synchronization modifies the destination.
 - Reports file-system operation errors and provides a final summary.
 
@@ -204,6 +205,8 @@ The project includes a Pester test suite covering the core synchronization behav
 - Summary and error handling
 - SHA-256 transfer verification
 - SHA-256 pre-synchronization self-test
+- Source creation and last-write timestamp preservation for copied and updated files
+- Unchanged destination timestamp preservation
 
 Run the tests from the project directory with:
 
