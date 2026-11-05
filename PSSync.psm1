@@ -408,6 +408,11 @@ function Copy-PSSyncFile
         return $false
     }
 
+    [System.IO.File]::SetCreationTimeUtc(
+        $DestinationFilePath,
+        $SourceFile.CreationTimeUtc
+    )
+
     [System.IO.File]::SetLastWriteTimeUtc(
         $DestinationFilePath,
         $SourceFile.LastWriteTimeUtc
