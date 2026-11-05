@@ -72,6 +72,114 @@ Describe "PSSync Module" {
         }
     }
 
+
+    It "Preserves source creation and last-write timestamps when copying a new file" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $SourceCreationTimeUtc = [datetime]::Parse("2025-01-01T08:15:00Z").ToUniversalTime()
+        $SourceLastWriteTimeUtc = [datetime]::Parse("2026-03-14T16:45:00Z").ToUniversalTime()
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            Set-Content -Path $SourceFilePath -Value "TIMESTAMP COPY TEST"
+
+            [System.IO.File]::SetCreationTimeUtc($SourceFilePath, $SourceCreationTimeUtc)
+            [System.IO.File]::SetLastWriteTimeUtc($SourceFilePath, $SourceLastWriteTimeUtc)
+
+            PSSync $SourcePath $DestinationPath
+
+            [System.IO.File]::GetCreationTimeUtc($DestinationFilePath) |
+                Should Be $SourceCreationTimeUtc
+            [System.IO.File]::GetLastWriteTimeUtc($DestinationFilePath) |
+                Should Be $SourceLastWriteTimeUtc
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Preserves source creation and last-write timestamps when updating a file" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $SourceCreationTimeUtc = [datetime]::Parse("2025-01-01T08:15:00Z").ToUniversalTime()
+        $SourceLastWriteTimeUtc = [datetime]::Parse("2026-03-14T16:45:00Z").ToUniversalTime()
+        $OldDestinationCreationTimeUtc = [datetime]::Parse("2024-02-01T09:30:00Z").ToUniversalTime()
+        $OldDestinationLastWriteTimeUtc = [datetime]::Parse("2025-02-01T09:30:00Z").ToUniversalTime()
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "UPDATED SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "OLD DESTINATION CONTENT"
+
+            [System.IO.File]::SetCreationTimeUtc($SourceFilePath, $SourceCreationTimeUtc)
+            [System.IO.File]::SetLastWriteTimeUtc($SourceFilePath, $SourceLastWriteTimeUtc)
+            [System.IO.File]::SetCreationTimeUtc($DestinationFilePath, $OldDestinationCreationTimeUtc)
+            [System.IO.File]::SetLastWriteTimeUtc($DestinationFilePath, $OldDestinationLastWriteTimeUtc)
+
+            PSSync $SourcePath $DestinationPath
+
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "UPDATED SOURCE CONTENT"
+            [System.IO.File]::GetCreationTimeUtc($DestinationFilePath) |
+                Should Be $SourceCreationTimeUtc
+            [System.IO.File]::GetLastWriteTimeUtc($DestinationFilePath) |
+                Should Be $SourceLastWriteTimeUtc
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Leaves destination timestamps unchanged when no file transfer is needed" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath "TestFile.txt"
+        $DestinationFilePath = Join-Path $DestinationPath "TestFile.txt"
+        $SourceCreationTimeUtc = [datetime]::Parse("2025-01-01T08:15:00Z").ToUniversalTime()
+        $SharedLastWriteTimeUtc = [datetime]::Parse("2026-03-14T16:45:00Z").ToUniversalTime()
+        $DestinationCreationTimeUtc = [datetime]::Parse("2024-02-01T09:30:00Z").ToUniversalTime()
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "SAME AGE SOURCE"
+            Set-Content -Path $DestinationFilePath -Value "UNCHANGED DESTINATION"
+
+            [System.IO.File]::SetCreationTimeUtc($SourceFilePath, $SourceCreationTimeUtc)
+            [System.IO.File]::SetLastWriteTimeUtc($SourceFilePath, $SharedLastWriteTimeUtc)
+            [System.IO.File]::SetCreationTimeUtc($DestinationFilePath, $DestinationCreationTimeUtc)
+            [System.IO.File]::SetLastWriteTimeUtc($DestinationFilePath, $SharedLastWriteTimeUtc)
+
+            PSSync $SourcePath $DestinationPath
+
+            (Get-Content -LiteralPath $DestinationFilePath -Raw).Trim() |
+                Should Be "UNCHANGED DESTINATION"
+            [System.IO.File]::GetCreationTimeUtc($DestinationFilePath) |
+                Should Be $DestinationCreationTimeUtc
+            [System.IO.File]::GetLastWriteTimeUtc($DestinationFilePath) |
+                Should Be $SharedLastWriteTimeUtc
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
     It "Updates an older destination file when the source is newer" {
         $TestRoot = New-PSSyncTestRoot
         $SourcePath = Join-Path $TestRoot "Source"
