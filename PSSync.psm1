@@ -28,6 +28,7 @@
 # | - A source directory that does not exist in the destination is created.    |
 # | - A source file that does not exist in the destination is copied.          |
 # | - A source file newer than its destination counterpart is copied.          |
+# | - Copied and updated files retain source CreationTimeUtc and LastWriteTimeUtc.|
 # | - A source file that is the same age or older is left alone.               |
 # | - Destination-only files are retained unless -Mirror is specified.         |
 # | - Destination-only directories are retained unless -Mirror is              |
@@ -45,6 +46,7 @@
 # | - Synchronization planning is implemented.                                 |
 # | - File/directory conflict detection is implemented and tested.             |
 # | - Copy/update verification is implemented using SHA-256 hashes.            |
+# | - Verified transfers preserve source creation and last-write timestamps.     |
 # |                                                                            |
 # | Security:                                                                  |
 # | PSSync uses SHA-256, a FIPS-approved hashing algorithm, for verification   |
@@ -485,6 +487,7 @@ function Copy-PSSyncFile
 # |                                                                            |
 # | Limitations:                                                               |
 # | - File synchronization decisions are based on LastWriteTimeUtc.            |
+# | - Verified transfers preserve CreationTimeUtc and LastWriteTimeUtc.          |
 # | - File contents are verified with SHA-256 after copy/update.               |
 # | - File exclusions and inclusion filters are not currently supported.       |
 # | - External logging is not currently supported.                             |
@@ -501,7 +504,8 @@ function PSSync
 
     PSSync uses LastWriteTimeUtc to determine whether an existing destination file
     needs to be transferred. Files that are copied or updated are verified using
-    SHA-256 after transfer.
+    SHA-256 after transfer. Successful transfers also preserve the source
+    CreationTimeUtc and LastWriteTimeUtc values at the destination.
 
     .PARAMETER Source
     The source directory to synchronize.
