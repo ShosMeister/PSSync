@@ -2,7 +2,7 @@
 
     RootModule = 'PSSync.psm1'
 
-    ModuleVersion = '1.1.1'
+    ModuleVersion = '1.1.2'
 
     GUID = '81a34f5d-c22c-471b-8ece-326fd74302dd'
 
