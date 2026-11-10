@@ -6,6 +6,10 @@ It synchronizes files and directories from a source tree to a destination tree u
 
 ## Features
 - Copies files that are missing from the destination.
+- Includes hidden and system files and directories in enumeration.
+- Supports rsync-style path glob exclusions from a text file with `-ExcludeFrom`.
+- Preserves excluded destination paths during `-Mirror` runs, or deletes them with `-DeleteExcluded` (like rsync's `--delete-excluded`).
+- Defers files temporarily locked or removed during scanning and retries them on a later run.
 - Updates destination files when the source file is newer.
 - Leaves destination files alone when they are the same age or newer.
 - Creates destination directories required by the source.
@@ -47,6 +51,12 @@ PSSync "C:\Source" "D:\Destination"
 
 The source must be an existing directory. The destination directory is created when it does not already exist.
 
+Use `-ExcludeFrom` to load patterns from a text file. Blank lines and lines beginning with `#` are ignored. A leading `/` anchors a pattern to the source root; a trailing `/` marks a directory; `*` and `?` match within one path component, while `**` can span path components. Matching paths are excluded from both trees, so excluded destination items are kept during mirror cleanup.
+
+```powershell
+PSSync "C:\Source" "D:\Destination" -Mirror -ExcludeFrom .\exclusions.txt -WhatIf
+```
+
 
 ## Mirror Mode
 Use '-Mirror' when the destination should also be cleaned of items that do not exist in the source:
@@ -58,6 +68,15 @@ PSSync "C:\Source" "D:\Destination" -Mirror
 Without '-Mirror', destination-only files and directories are retained.
 
 **Use '-Mirror' carefully.** It can permanently delete destination files and directories.
+
+### Deleting excluded items
+By default, destination items that match an exclusion pattern are left alone during `-Mirror`. Add `-DeleteExcluded` (only allowed together with `-Mirror`) to delete them as well; an excluded directory is deleted with everything in it:
+
+```powershell
+PSSync "C:\Source" "D:\Destination" -Mirror -ExcludeFrom .\exclusions.txt -DeleteExcluded -WhatIf
+```
+
+With `-WhatIf` each one is reported as `WOULD DELETE EXCLUDED:` (or `WOULD DELETE EXCLUDED DIRECTORY:`). Preview after any change to the exclusion file: a wrong pattern deletes that data from the destination.
 
 
 ## WhatIf
@@ -110,6 +129,7 @@ For each source item:
 10. The SHA-256 verification mechanism is self-tested before synchronization modifies the destination.
 11. After a successful verified copy or update, the destination file's `CreationTimeUtc` and `LastWriteTimeUtc` are set to the corresponding source timestamps.
 12. Files that do not need to be transferred are left untouched, including their destination timestamps.
+13. Hidden and system files and directories are included during enumeration.
 
 
 ## Progress Reporting
@@ -133,14 +153,26 @@ PSSync verifies every file that it copies or updates.
 
 The verification process is:
 
-1. A SHA-256 hash is calculated for the source file during synchronization planning.
-2. The source file is copied or updated.
-3. The source file is hashed again after the transfer.
-4. The destination file is hashed.
-5. The transfer is successful only when all three SHA-256 values match.
+1. The source file is copied or updated, and its SHA-256 hash is calculated from
+   the same bytes as they are copied, so each source file is read only once.
+2. The source file's size and last-write time are checked against their values when
+   the copy started. If either changed, the file is deferred to the next run.
+3. The destination file is hashed.
+4. The transfer is successful only when the source and destination SHA-256 values match.
 
 This protects against a source file changing during the transfer and verifies that
-the destination contents match the source contents that were planned for transfer.
+the destination contents match the source contents that were copied. Files that are
+unchanged are never read.
+
+A file that is locked by another program, or disappears, while it is being copied is
+reported as a deferred transient file rather than an error, and is retried on the next run.
+
+A source or destination path of 260 characters or more cannot be opened by Windows PowerShell 5.1. Such files are
+reported as errors (`Path too long`), not deferred, so they are never skipped silently. PowerShell 7 supports long paths.
+
+When run with `-Verbose`, PSSync also writes `COPYING:`/`UPDATING:` before each transfer,
+a `PROGRESS:` line about every 10 seconds during long transfers, and `VERIFYING:` before
+the destination hash.
 
 PSSync uses SHA-256, a FIPS-approved hashing algorithm, for verification of files
 transferred during synchronization. PSSync does not use MD5 or SHA-1 for file
@@ -186,7 +218,7 @@ PSSync currently:
 - Uses 'LastWriteTimeUtc' to determine whether an existing destination file needs
   to be transferred. SHA-256 is used to verify files that are transferred.
 - Does not use hashes to determine whether unchanged files need to be transferred.
-- Does not provide file or directory include/exclude filters.
+- Does not provide include filters; exclusions are supported through `-ExcludeFrom`.
 - Does not provide external logging.
 - Is intended primarily as a straightforward directory synchronization utility rather than a full replacement for mature synchronization tools.
 

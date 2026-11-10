@@ -985,4 +985,120 @@ Describe "PSSync Module" {
             Remove-PSSyncTestRoot $TestRoot
         }
     }
+
+    It "Keeps excluded destination items in Mirror mode without DeleteExcluded" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $ExcludeFilePath = Join-Path $TestRoot "Exclusions.txt"
+        $ExcludedFilePath = Join-Path $DestinationPath "Skip.tmp"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            Set-Content -Path $ExcludeFilePath -Value "*.tmp"
+            Set-Content -Path (Join-Path $SourcePath "Keep.txt") -Value "KEEP"
+            Set-Content -Path $ExcludedFilePath -Value "EXCLUDED"
+
+            PSSync $SourcePath $DestinationPath -Mirror -ExcludeFrom $ExcludeFilePath
+
+            Test-Path -LiteralPath $ExcludedFilePath -PathType Leaf |
+                Should Be $true
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Deletes excluded destination files and directories with DeleteExcluded" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $ExcludeFilePath = Join-Path $TestRoot "Exclusions.txt"
+        $ExcludedFilePath = Join-Path $DestinationPath "Skip.tmp"
+        $ExcludedDirectoryPath = Join-Path $DestinationPath "Cache"
+        $KeptFilePath = Join-Path $DestinationPath "Keep.txt"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $ExcludedDirectoryPath "Sub") -Force | Out-Null
+            Set-Content -Path $ExcludeFilePath -Value @("*.tmp", "/Cache/")
+            Set-Content -Path (Join-Path $SourcePath "Keep.txt") -Value "KEEP"
+            Set-Content -Path (Join-Path $SourcePath "Source.tmp") -Value "SOURCE EXCLUDED"
+            Set-Content -Path $ExcludedFilePath -Value "EXCLUDED"
+            Set-Content -Path (Join-Path $ExcludedDirectoryPath "Sub\Old.bin") -Value "OLD CACHE"
+
+            PSSync $SourcePath $DestinationPath -Mirror -ExcludeFrom $ExcludeFilePath -DeleteExcluded
+
+            Test-Path -LiteralPath $ExcludedFilePath -PathType Leaf |
+                Should Be $false
+
+            Test-Path -LiteralPath $ExcludedDirectoryPath -PathType Container |
+                Should Be $false
+
+            Test-Path -LiteralPath $KeptFilePath -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath (Join-Path $SourcePath "Source.tmp") -PathType Leaf |
+                Should Be $true
+
+            Test-Path -LiteralPath (Join-Path $DestinationPath "Source.tmp") -PathType Leaf |
+                Should Be $false
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Reports excluded deletions without deleting them in WhatIf mode" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $ExcludeFilePath = Join-Path $TestRoot "Exclusions.txt"
+        $ExcludedFilePath = Join-Path $DestinationPath "Skip.tmp"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            Set-Content -Path $ExcludeFilePath -Value "*.tmp"
+            Set-Content -Path $ExcludedFilePath -Value "EXCLUDED"
+
+            $Output = PSSync $SourcePath $DestinationPath -Mirror -ExcludeFrom $ExcludeFilePath -DeleteExcluded -WhatIf 6>&1 |
+                ForEach-Object { [string]$_ }
+
+            Test-Path -LiteralPath $ExcludedFilePath -PathType Leaf |
+                Should Be $true
+
+            (@($Output | Where-Object { $_ -eq "WOULD DELETE EXCLUDED: Skip.tmp" }).Count -eq 1) |
+                Should Be $true
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
+
+    It "Rejects DeleteExcluded without Mirror" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+
+            {
+                PSSync $SourcePath $DestinationPath -DeleteExcluded
+            } | Should Throw
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
 }

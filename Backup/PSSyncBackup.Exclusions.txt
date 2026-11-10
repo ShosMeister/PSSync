@@ -1,0 +1,57 @@
+# One rsync-style glob pattern per line; # begins a comment.
+# A leading / anchors the path to the drive root. A trailing / marks a directory.
+# * and ? match within one path component; ** can span multiple components.
+# Excluded destination items are preserved even when -Mirror is enabled.
+/System Volume Information/
+/$RECYCLE.BIN/
+
+# Windows Installer rollback files (access denied; would fail the scan).
+/Config.Msi/
+
+# Microsoft Store app installs and their data (TrustedInstaller-owned,
+# partly access denied, and not restorable by copying).
+/WindowsApps/
+/WpSystem/
+/Program Files/ModifiableWindowsApps/
+
+# Windows Update and download caches.
+/DeliveryOptimization/
+/WUDownloadCache/
+/msdownld.tmp/
+
+# Visual Studio installer package cache (re-downloadable).
+/ProgramData/Microsoft/VisualStudio/Packages/
+
+# Dropbox client marker and cache files (anywhere on the drive).
+.dropbox
+.dropbox.device
+.dropbox.cache/
+
+# Nextcloud / ownCloud desktop client sync databases and logs (anywhere).
+.sync_*.db
+.sync_*.db-wal
+.sync_*.db-shm
+.nextcloudsync.log
+.owncloudsync.log
+
+# Mac Finder and drive housekeeping (useless on Windows). ._* files are kept,
+# because they can hold the resource fork of old classic Mac files.
+.DS_Store
+.fseventsd/
+.Spotlight-V100/
+.Trashes/
+
+# Visual Studio per-solution cache (rebuilt when the solution is opened).
+.vs/
+
+# Visual Studio: the IDE (Common7) and shared SDKs (Shared, e.g. the Android
+# SDK) are restored by reinstalling, and hold paths too long for Windows
+# PowerShell 5.1. The rest of the Visual Studio folders stay as a record of
+# what is installed. ** keeps this working when the version or edition changes.
+/Program Files/Microsoft Visual Studio/**/Common7/
+/Program Files (x86)/Microsoft Visual Studio/Shared/
+
+# Temporary files (anywhere): *.tmp, including Outlook's ~<name>.pst.tmp,
+# and the ~$<name> owner/lock files Office leaves beside open documents.
+*.tmp
+~$*

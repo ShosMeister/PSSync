@@ -259,6 +259,8 @@ Backup*/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/
+!/Backup/
+!/Backup/**
 *.rptproj.bak
 
 # SQL Server files
@@ -367,3 +369,7 @@ FodyWeavers.xsd
 /Tests/PSSync-1.1.0-Verification.Tests.ps1
 /PSSync-1.1.0-FIPS-SHA256.psm1
 /Tests/PSSync.Tests - Copy.ps1
+
+# PSSync backup: personal settings, encrypted credentials, and local logs
+Backup/Config/
+Backup/Logs/

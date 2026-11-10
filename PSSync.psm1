@@ -12,6 +12,7 @@
 # | - Validates source and destination locations.                              |
 # | - Builds a synchronization plan before modifying the destination.          |
 # | - Creates destination directories required by the source.                  |
+# | - Includes hidden and system files and directories in enumeration.         |
 # | - Copies missing source files to the destination.                          |
 # | - Updates destination files when the source is newer.                      |
 # | - Leaves current destination files unchanged.                              |
@@ -26,6 +27,7 @@
 # |                                                                            |
 # | Synchronization Rules:                                                     |
 # | - A source directory that does not exist in the destination is created.    |
+# | - Hidden and system source and destination items are enumerated.            |
 # | - A source file that does not exist in the destination is copied.          |
 # | - A source file newer than its destination counterpart is copied.          |
 # | - Copied and updated files retain source CreationTimeUtc and LastWriteTimeUtc.|
@@ -115,13 +117,164 @@ function Get-PSSyncRelativePath
     throw "The file path is not located within the specified root directory: $FilePath"
 }
 
+function ConvertTo-PSSyncGlobRegex
+{
+    param([Parameter(Mandatory = $true)][string]$Pattern)
+
+    $Regex = [System.Text.RegularExpressions.Regex]::Escape($Pattern.Replace('\', '/'))
+    $Regex = $Regex.Replace('\*\*/', '(?:.*/)?')
+    $Regex = $Regex.Replace('\*\*', '.*')
+    $Regex = $Regex.Replace('\*', '[^/]*')
+    $Regex = $Regex.Replace('\?', '[^/]')
+    return $Regex
+}
+
+function Test-PSSyncExcludedPath
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.IEnumerable]$Patterns,
+        [Parameter(Mandatory = $true)][bool]$IsDirectory
+    )
+
+    $NormalizedPath = $RelativePath.Replace('\', '/')
+    $PathParts = @($NormalizedPath -split '/')
+
+    foreach ($RawPattern in $Patterns)
+    {
+        $Pattern = ([string]$RawPattern).Trim().Replace('\', '/')
+        if ([string]::IsNullOrWhiteSpace($Pattern) -or $Pattern.StartsWith('#')) { continue }
+
+        $RootAnchored = $Pattern.StartsWith('/')
+        if ($RootAnchored) { $Pattern = $Pattern.Substring(1) }
+        $DirectoryOnly = $Pattern.EndsWith('/')
+        if ($DirectoryOnly) { $Pattern = $Pattern.TrimEnd('/') }
+        if ([string]::IsNullOrWhiteSpace($Pattern)) { continue }
+
+        $HasSlash = $Pattern.Contains('/')
+        $GlobRegex = ConvertTo-PSSyncGlobRegex -Pattern $Pattern
+        $RegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+
+        if (-not $HasSlash -and -not $RootAnchored)
+        {
+            for ($lp = 0; $lp -lt $PathParts.Count; $lp = $lp + 1)
+            {
+                if ([System.Text.RegularExpressions.Regex]::IsMatch($PathParts[$lp], ('^' + $GlobRegex + '$'), $RegexOptions))
+                {
+                    $IsMatchedPartDirectory = ($lp -lt ($PathParts.Count - 1)) -or $IsDirectory
+                    if ($DirectoryOnly -and -not $IsMatchedPartDirectory) { continue }
+                    if ($IsMatchedPartDirectory -or $lp -eq ($PathParts.Count - 1)) { return $true }
+                }
+            }
+            continue
+        }
+
+        $CandidatePaths = @($NormalizedPath)
+        if ($IsDirectory -or $DirectoryOnly)
+        {
+            $CandidatePaths = $CandidatePaths + ($NormalizedPath + '/')
+        }
+
+        $Suffix = if ($DirectoryOnly) { '(?:/.*)?' } else { '' }
+        foreach ($CandidatePath in $CandidatePaths)
+        {
+            if ([System.Text.RegularExpressions.Regex]::IsMatch($CandidatePath, ('^' + $GlobRegex + $Suffix + '$'), $RegexOptions))
+            {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+<#
+    Get-PSSyncTree
+
+    What it does:
+        Walks a directory tree (including hidden and system items) and
+        returns its files and directories, skipping anything that matches
+        an exclusion pattern. Excluded directories are not walked into.
+
+    Passed in:
+        RootPath           Root directory to walk.
+        ExclusionPatterns  Exclusion pattern lines (may be empty).
+        TreeLabel          'SOURCE' or 'DESTINATION', for progress output.
+        CollectExcluded    Also return the excluded items themselves
+                           (used by -DeleteExcluded on the destination).
+
+    Passed out:
+        Object with Files, Directories, ExcludedCount, and ExcludedItems
+        (the excluded files and top-level excluded directories; empty
+        unless CollectExcluded is given).
+#>
+function Get-PSSyncTree
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.IEnumerable]$ExclusionPatterns,
+        [Parameter(Mandatory = $true)][string]$TreeLabel,
+        [switch]$CollectExcluded
+    )
+
+    $ExcludedItems = New-Object 'System.Collections.Generic.List[System.IO.FileSystemInfo]'
+    $Files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $Directories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
+    $PendingDirectories = New-Object 'System.Collections.Generic.Stack[string]'
+    $PendingDirectories.Push($RootPath)
+    $ExcludedCount = 0
+    $VisitedCount = 0
+
+    while ($PendingDirectories.Count -gt 0)
+    {
+        $CurrentDirectory = $PendingDirectories.Pop()
+        foreach ($Item in Get-ChildItem -LiteralPath $CurrentDirectory -Force -ErrorAction Stop)
+        {
+            $VisitedCount = $VisitedCount + 1
+            if (($VisitedCount % 100) -eq 0)
+            {
+                Write-Progress -Activity 'PSSync' -Status ("Enumerating {0}: {1} items" -f $TreeLabel, $VisitedCount)
+                Write-Host ("PROGRESS: Enumerated {0} tree items: {1}" -f $TreeLabel, $VisitedCount)
+            }
+
+            $RelativePath = Get-PSSyncRelativePath -SourcePath $RootPath -FilePath $Item.FullName
+            if (Test-PSSyncExcludedPath -RelativePath $RelativePath -Patterns $ExclusionPatterns -IsDirectory ([bool]$Item.PSIsContainer))
+            {
+                $ExcludedCount = $ExcludedCount + 1
+                Write-Host ("EXCLUDED {0}: {1}" -f $TreeLabel, $RelativePath)
+                if ($CollectExcluded)
+                {
+                    $ExcludedItems.Add([System.IO.FileSystemInfo]$Item)
+                }
+                continue
+            }
+
+            if ($Item.PSIsContainer)
+            {
+                $Directories.Add([System.IO.DirectoryInfo]$Item)
+                $PendingDirectories.Push($Item.FullName)
+            }
+            else
+            {
+                $Files.Add([System.IO.FileInfo]$Item)
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Files = $Files
+        Directories = $Directories
+        ExcludedCount = $ExcludedCount
+        ExcludedItems = $ExcludedItems
+    }
+}
+
 
 # +----------------------------------------------------------------------------+
 # | Get-PSSyncFileHash                                                         |
 # +----------------------------------------------------------------------------+
 # | Purpose:                                                                   |
-# | Calculates the SHA-256 hash of a file using the Windows CNG-backed         |
-# | SHA256Cng implementation provided by the .NET Framework.                  |
+# | Calculates the SHA-256 hash of a file using the runtime SHA-256 provider.  |
 # |                                                                            |
 # | Responsibilities:                                                          |
 # | - Open the specified file for read access.                                 |
@@ -145,8 +298,7 @@ function Get-PSSyncRelativePath
 # | - File and cryptographic errors are allowed to terminate the caller.       |
 # |                                                                            |
 # | Limitations:                                                               |
-# | - Requires the Windows CNG SHA-256 implementation available to .NET        |
-# |   Framework on supported Windows hosts.                                   |
+# | - Requires a .NET runtime with SHA-256 support.                            |
 # +----------------------------------------------------------------------------+
 function Get-PSSyncFileHash
 {
@@ -167,7 +319,7 @@ function Get-PSSyncFileHash
             [System.IO.FileShare]::Read
         )
 
-        $HashAlgorithm = New-Object System.Security.Cryptography.SHA256Cng
+        $HashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
         $HashBytes = $HashAlgorithm.ComputeHash($FileStream)
 
         return ([System.BitConverter]::ToString($HashBytes)).Replace("-", "").ToUpperInvariant()
@@ -189,6 +341,30 @@ function Get-PSSyncFileHash
             $FileStream.Dispose()
         }
     }
+}
+
+function Test-PSSyncFileTransient
+{
+    param([Parameter(Mandatory = $true)][System.Exception]$Exception)
+
+    $CurrentException = $Exception
+    while ($null -ne $CurrentException)
+    {
+        $NativeErrorCode = $CurrentException.HResult -band 0xFFFF
+        if ($NativeErrorCode -eq 2 -or $NativeErrorCode -eq 3 -or $NativeErrorCode -eq 32 -or $NativeErrorCode -eq 33)
+        {
+            return $true
+        }
+
+        if ($CurrentException.Message -match 'being used by another process|used by another process|could not find (a part of )?(the )?path|could not find file')
+        {
+            return $true
+        }
+
+        $CurrentException = $CurrentException.InnerException
+    }
+
+    return $false
 }
 
 
@@ -262,53 +438,36 @@ function Test-PSSyncHashing
 }
 
 
-# +----------------------------------------------------------------------------+
-# | Copy-PSSyncFile                                                            |
-# +----------------------------------------------------------------------------+
-# | Purpose:                                                                   |
-# | Copies a file with byte-level progress and verifies the result against     |
-# | the known-good source hash captured during synchronization planning.       |
-# |                                                                            |
-# | Responsibilities:                                                          |
-# | - Copy the source file using buffered .NET file streams.                   |
-# | - Report byte-level progress for the current file.                         |
-# | - Recalculate the source SHA-256 hash after the copy.                      |
-# | - Compare the post-copy source hash to the planning hash.                  |
-# | - Calculate the destination SHA-256 hash.                                  |
-# | - Compare the destination hash to the planning hash.                       |
-# |                                                                            |
-# | Inputs:                                                                    |
-# | SourceFile As FileInfo                                                     |
-# | - The source file to copy.                                                 |
-# |                                                                            |
-# | DestinationFilePath As String                                              |
-# | - The full destination path.                                               |
-# |                                                                            |
-# | ExpectedSourceHash As String                                               |
-# | - The SHA-256 hash captured during synchronization planning.               |
-# |                                                                            |
-# | Operation As String                                                        |
-# | - The operation name shown in progress output.                             |
-# |                                                                            |
-# | Outputs:                                                                   |
-# | Returns $true only when the source remained unchanged and the              |
-# | destination matches the known-good source hash.                            |
-# |                                                                            |
-# | State Changes:                                                             |
-# | - Creates or replaces the destination file.                                |
-# | - Does not modify the source file.                                         |
-# |                                                                            |
-# | Usage:                                                                     |
-# | $Verified = Copy-PSSyncFile $SourceFile $DestinationPath $Hash "Copying"   |
-# |                                                                            |
-# | Error Handling:                                                            |
-# | - File and hash errors are allowed to terminate the caller's try block.    |
-# | - Verification mismatches return $false after reporting the reason.        |
-# |                                                                            |
-# | Limitations:                                                               |
-# | - Verification requires reading the source after the copy and the          |
-# |   destination after the copy.                                              |
-# +----------------------------------------------------------------------------+
+<#
+    Copy-PSSyncFile
+
+    What it does:
+        Copies one file with buffered .NET streams, calculating the source
+        SHA-256 hash from the same bytes as they are copied, so the source
+        is read only once. Then checks that the source did not change while
+        it was being copied (same length and last-write time as when the
+        copy started), hashes the destination, and compares the two hashes.
+        On success the destination gets the source creation and last-write
+        times.
+
+        Verbose output (only shown when PSSync is run with -Verbose):
+            COPYING: <file> (<bytes> bytes)     or UPDATING:, before the copy
+            PROGRESS: <file> ...                about every 10 seconds
+            VERIFYING: <file> (<bytes> bytes)   before the destination hash
+
+    Passed in:
+        SourceFile As FileInfo         The source file to copy.
+        DestinationFilePath As String  The full destination path.
+        Operation As String            'Copying' or 'Updating', for progress.
+
+    Passed out:
+        $true when the copy is complete and verified.
+        $false when the source changed during the copy (deferred; the
+        destination is marked old so it is retried next run, and
+        $script:LastCopyWasDeferred is $true) or when the destination hash
+        does not match (reported as an error).
+        File-access errors are thrown to the caller.
+#>
 function Copy-PSSyncFile
 {
     param(
@@ -319,17 +478,25 @@ function Copy-PSSyncFile
         [string]$DestinationFilePath,
 
         [Parameter(Mandatory = $true)]
-        [string]$ExpectedSourceHash,
-
-        [Parameter(Mandatory = $true)]
         [string]$Operation
     )
 
-    $BufferSize = 1048576
+    $BUFFER_SIZE = 1048576
+    $VERBOSE_PROGRESS_SECONDS = 10
     $BytesCopied = [int64]0
-    $SourceLength = $SourceFile.Length
     $SourceStream = $null
     $DestinationStream = $null
+    $HashAlgorithm = $null
+    $SourceHash = ''
+    $script:LastCopyWasDeferred = $false
+
+    $SourceFile.Refresh()
+    $SourceLength = $SourceFile.Length
+    $SourceLastWriteTimeUtc = $SourceFile.LastWriteTimeUtc
+    $SourceCreationTimeUtc = $SourceFile.CreationTimeUtc
+
+    $ProgressTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-Verbose ("{0}: {1} ({2} bytes)" -f $Operation.ToUpperInvariant(), $SourceFile.FullName, $SourceLength)
 
     try
     {
@@ -347,7 +514,8 @@ function Copy-PSSyncFile
             [System.IO.FileShare]::None
         )
 
-        $Buffer = New-Object byte[] $BufferSize
+        $HashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+        $Buffer = New-Object byte[] $BUFFER_SIZE
         $BytesRead = 0
 
         do
@@ -357,6 +525,7 @@ function Copy-PSSyncFile
             if ($BytesRead -gt 0)
             {
                 $DestinationStream.Write($Buffer, 0, $BytesRead)
+                [void]$HashAlgorithm.TransformBlock($Buffer, 0, $BytesRead, $null, 0)
                 $BytesCopied = $BytesCopied + $BytesRead
 
                 if ($SourceLength -gt 0)
@@ -371,14 +540,27 @@ function Copy-PSSyncFile
                 Write-Progress -Activity "PSSync" `
                     -Status "$Operation`: $($SourceFile.Name) - $([math]::Round($BytesCopied / 1MB, 1)) MB / $([math]::Round($SourceLength / 1MB, 1)) MB" `
                     -PercentComplete $PercentComplete
+
+                if ($ProgressTimer.Elapsed.TotalSeconds -ge $VERBOSE_PROGRESS_SECONDS)
+                {
+                    Write-Verbose ("PROGRESS: {0} {1}: {2:N1} MB / {3:N1} MB ({4}%)" -f $Operation, $SourceFile.FullName, ($BytesCopied / 1MB), ($SourceLength / 1MB), $PercentComplete)
+                    $ProgressTimer.Restart()
+                }
             }
         }
         while ($BytesRead -gt 0)
 
+        [void]$HashAlgorithm.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+        $SourceHash = ([System.BitConverter]::ToString($HashAlgorithm.Hash)).Replace("-", "").ToUpperInvariant()
         $DestinationStream.Flush()
     }
     finally
     {
+        if ($null -ne $HashAlgorithm)
+        {
+            $HashAlgorithm.Dispose()
+        }
+
         if ($null -ne $DestinationStream)
         {
             $DestinationStream.Dispose()
@@ -390,21 +572,31 @@ function Copy-PSSyncFile
         }
     }
 
-    Write-Progress -Activity "PSSync" -Status "Verifying source: $($SourceFile.Name)" -PercentComplete 100
-
-    $CurrentSourceHash = Get-PSSyncFileHash $SourceFile.FullName
-
-    if ($CurrentSourceHash -ne $ExpectedSourceHash)
+    <#
+        The source must be exactly as it was when the copy started.
+    #>
+    $SourceFile.Refresh()
+    if ($SourceFile.Length -ne $SourceLength -or $BytesCopied -ne $SourceLength -or $SourceFile.LastWriteTimeUtc -ne $SourceLastWriteTimeUtc)
     {
-        Write-Host "ERROR: Source changed during synchronization: $($SourceFile.FullName)"
+        $script:LastCopyWasDeferred = $true
+        try
+        {
+            [System.IO.File]::SetLastWriteTimeUtc($DestinationFilePath, (New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)))
+        }
+        catch
+        {
+            Write-Host "WARNING: Could not mark the incomplete destination for retry: $DestinationFilePath"
+        }
+        Write-Host "DEFERRED TRANSIENT FILE: $($SourceFile.FullName); source changed during synchronization. It will be retried on the next run."
         return $false
     }
 
     Write-Progress -Activity "PSSync" -Status "Verifying destination: $($SourceFile.Name)" -PercentComplete 100
+    Write-Verbose ("VERIFYING: {0} ({1} bytes)" -f $SourceFile.FullName, $SourceLength)
 
     $DestinationHash = Get-PSSyncFileHash $DestinationFilePath
 
-    if ($DestinationHash -ne $ExpectedSourceHash)
+    if ($DestinationHash -ne $SourceHash)
     {
         Write-Host "ERROR: Destination verification failed: $DestinationFilePath"
         return $false
@@ -412,12 +604,12 @@ function Copy-PSSyncFile
 
     [System.IO.File]::SetCreationTimeUtc(
         $DestinationFilePath,
-        $SourceFile.CreationTimeUtc
+        $SourceCreationTimeUtc
     )
 
     [System.IO.File]::SetLastWriteTimeUtc(
         $DestinationFilePath,
-        $SourceFile.LastWriteTimeUtc
+        $SourceLastWriteTimeUtc
     )
 
     return $true
@@ -437,7 +629,7 @@ function Copy-PSSyncFile
 # | - Determine required destination directories.                              |
 # | - Determine missing, newer, and unchanged files.                           |
 # | - Determine destination-only files and directories.                        |
-# | - Calculate and store source hashes during synchronization planning.       |
+# | - Calculate source hashes while copying (each source file is read once).  |
 # | - Verify SHA-256 hashing before modifying the destination.                 |
 # | - Execute the synchronization plan when not in WhatIf mode.                |
 # | - Report the synchronization plan when in WhatIf mode.                     |
@@ -457,6 +649,11 @@ function Copy-PSSyncFile
 # | WhatIf                                                                     |
 # | - When specified, displays what would happen without modifying files       |
 # |   or directories.                                                          |
+# |                                                                            |
+# | DeleteExcluded As Switch                                                   |
+# | - Requires -Mirror. Destination items that match an exclusion pattern are  |
+# |   deleted (excluded directories with everything in them), like rsync's     |
+# |   --delete-excluded. Without it, excluded destination items are kept.      |
 # |                                                                            |
 # | ChangesOnly As Switch                                                      |
 # | - When specified, suppresses per-item messages for files that require      |
@@ -479,6 +676,7 @@ function Copy-PSSyncFile
 # | PSSync "C:\Source" "D:\Destination"                                        |
 # | PSSync "C:\Source" "D:\Destination" -Mirror                                |
 # | PSSync "C:\Source" "D:\Destination" -Mirror -WhatIf                        |
+# | PSSync "C:\Source" "D:\Destination" -Mirror -ExcludeFrom X -DeleteExcluded |
 # | PSSync "C:\Source" "D:\Destination" -ChangesOnly                           |
 # |                                                                            |
 # | Error Handling:                                                            |
@@ -489,7 +687,7 @@ function Copy-PSSyncFile
 # | - File synchronization decisions are based on LastWriteTimeUtc.            |
 # | - Verified transfers preserve CreationTimeUtc and LastWriteTimeUtc.          |
 # | - File contents are verified with SHA-256 after copy/update.               |
-# | - File exclusions and inclusion filters are not currently supported.       |
+# | - Exclusions are supported from a text file with -ExcludeFrom.             |
 # | - External logging is not currently supported.                             |
 # +----------------------------------------------------------------------------+
 function PSSync
@@ -519,6 +717,16 @@ function PSSync
     .PARAMETER ChangesOnly
     Suppresses per-item messages for files that require no action.
 
+    .PARAMETER ExcludeFrom
+    Text file containing glob patterns for paths excluded from source and
+    destination enumeration. Excluded destination content is preserved in Mirror mode
+    unless -DeleteExcluded is also given.
+
+    .PARAMETER DeleteExcluded
+    Requires -Mirror. Deletes destination files and directories that match an
+    exclusion pattern (excluded directories are deleted with their contents),
+    like rsync's --delete-excluded. Use -WhatIf first to see what would be deleted.
+
     .EXAMPLE
     PSSync "C:\Source" "D:\Destination"
 
@@ -530,6 +738,9 @@ function PSSync
 
     .EXAMPLE
     PSSync "C:\Source" "D:\Destination" -ChangesOnly
+
+    .EXAMPLE
+    PSSync "C:\Source" "D:\Destination" -Mirror -ExcludeFrom ".\Exclusions.txt" -DeleteExcluded -WhatIf
 
     .NOTES
     PSSync performs a SHA-256 self-test before synchronization modifies the
@@ -546,7 +757,13 @@ function PSSync
 
         [Parameter()]
         [switch]$Mirror,
-        [switch]$ChangesOnly
+        [switch]$ChangesOnly,
+
+        [Parameter()]
+        [string]$ExcludeFrom,
+
+        [Parameter()]
+        [switch]$DeleteExcluded
 
     )
 
@@ -558,8 +775,11 @@ function PSSync
     $UnchangedCount = 0
     $DeletedFileCount = 0
     $DeletedDirectoryCount = 0
+    $DeletedExcludedCount = 0
     $CreatedDirectoryCount = 0
     $ErrorCount = 0
+    $DeferredFileCount = 0
+    $DeferredRelativePaths = @{}
 
     $WouldCopyCount = 0
     $WouldUpdateCount = 0
@@ -567,6 +787,12 @@ function PSSync
     $WouldDeleteFileCount = 0
     $WouldDeleteDirectoryCount = 0
     $WouldCreateDirectoryCount = 0
+    $WouldDeleteExcludedCount = 0
+
+    if ($DeleteExcluded -and -not $Mirror)
+    {
+        throw "-DeleteExcluded can only be used together with -Mirror."
+    }
 
     $SourceExists = Test-Path -LiteralPath $SourcePath -PathType Container
 
@@ -595,70 +821,41 @@ function PSSync
 # | Enumerate Source                                                           |
 # +----------------------------------------------------------------------------+
 
-    $SourceFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
-    $SourceDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
-
-    Write-Progress -Activity "PSSync" -Status "Enumerating source files..."
-
-    foreach ($tmpItem in Get-ChildItem -LiteralPath $SourcePath -File -Recurse -ErrorAction Stop)
+    $ExclusionPatterns = @()
+    if (-not [string]::IsNullOrWhiteSpace($ExcludeFrom))
     {
-        $SourceFiles.Add($tmpItem)
-
-        if (($SourceFiles.Count % 100) -eq 0)
+        $ExcludeFilePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExcludeFrom)
+        if (-not (Test-Path -LiteralPath $ExcludeFilePath -PathType Leaf))
         {
-            Write-Progress -Activity "PSSync" -Status "Enumerating source files... $($SourceFiles.Count) found"
+            throw "The exclusion file does not exist: $ExcludeFilePath"
         }
+        $ExclusionPatterns = @(Get-Content -LiteralPath $ExcludeFilePath -ErrorAction Stop)
+        Write-Host ("Exclusion file: {0} ({1} rule lines)" -f $ExcludeFilePath, $ExclusionPatterns.Count)
     }
 
-    Write-Progress -Activity "PSSync" -Status "Enumerating source files... $($SourceFiles.Count) found"
-    Write-Progress -Activity "PSSync" -Status "Enumerating source directories..."
-
-    foreach ($tmpItem in Get-ChildItem -LiteralPath $SourcePath -Directory -Recurse -ErrorAction Stop)
-    {
-        $SourceDirectories.Add($tmpItem)
-
-        if (($SourceDirectories.Count % 100) -eq 0)
-        {
-            Write-Progress -Activity "PSSync" -Status "Enumerating source directories... $($SourceDirectories.Count) found"
-        }
-    }
-
-    Write-Progress -Activity "PSSync" -Status "Enumerating source directories... $($SourceDirectories.Count) found"
+    Write-Progress -Activity "PSSync" -Status "Enumerating source tree..."
+    $SourceTree = Get-PSSyncTree -RootPath $SourcePath -ExclusionPatterns $ExclusionPatterns -TreeLabel 'SOURCE'
+    $SourceFiles = $SourceTree.Files
+    $SourceDirectories = $SourceTree.Directories
+    $ExcludedCount = [int]$SourceTree.ExcludedCount
+    Write-Progress -Activity "PSSync" -Status ("Enumerating source tree... {0} files, {1} directories" -f $SourceFiles.Count, $SourceDirectories.Count)
 
 # +----------------------------------------------------------------------------+
 # | Enumerate Destination                                                      |
 # +----------------------------------------------------------------------------+
     $DestinationFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
     $DestinationDirectories = New-Object 'System.Collections.Generic.List[System.IO.DirectoryInfo]'
+    $ExcludedToDelete = New-Object 'System.Collections.Generic.List[System.IO.FileSystemInfo]'
 
     if ($DestinationExists)
     {
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination files..."
-
-        foreach ($tmpItem in Get-ChildItem -LiteralPath $DestinationPath -File -Recurse -ErrorAction Stop)
-        {
-            $DestinationFiles.Add($tmpItem)
-
-            if (($DestinationFiles.Count % 100) -eq 0)
-            {
-                Write-Progress -Activity "PSSync" -Status "Enumerating destination files... $($DestinationFiles.Count) found"
-            }
-        }
-
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination files... $($DestinationFiles.Count) found"
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination directories..."
-
-        foreach ($tmpItem in Get-ChildItem -LiteralPath $DestinationPath -Directory -Recurse -ErrorAction Stop)
-        {
-            $DestinationDirectories.Add($tmpItem)
-
-            if (($DestinationDirectories.Count % 100) -eq 0)
-            {
-                Write-Progress -Activity "PSSync" -Status "Enumerating destination directories... $($DestinationDirectories.Count) found"
-            }
-        }
-
-        Write-Progress -Activity "PSSync" -Status "Enumerating destination directories... $($DestinationDirectories.Count) found"
+        Write-Progress -Activity "PSSync" -Status "Enumerating destination tree..."
+        $DestinationTree = Get-PSSyncTree -RootPath $DestinationPath -ExclusionPatterns $ExclusionPatterns -TreeLabel 'DESTINATION' -CollectExcluded:$DeleteExcluded
+        $DestinationFiles = $DestinationTree.Files
+        $DestinationDirectories = $DestinationTree.Directories
+        $ExcludedToDelete = $DestinationTree.ExcludedItems
+        $ExcludedCount = $ExcludedCount + [int]$DestinationTree.ExcludedCount
+        Write-Progress -Activity "PSSync" -Status ("Enumerating destination tree... {0} files, {1} directories" -f $DestinationFiles.Count, $DestinationDirectories.Count)
     }
 
 # +----------------------------------------------------------------------------+
@@ -673,12 +870,48 @@ function PSSync
 # +----------------------------------------------------------------------------+
 # | Synchronization Plan                                                       |
 # +----------------------------------------------------------------------------+
-    $DirectoriesToCreate = @()
-    $FilesToCopy = @()
-    $FilesToUpdate = @()
-    $FilesToLeaveAlone = @()
-    $FilesToDelete = @()
-    $DirectoriesToDelete = @()
+    <#
+        Plan lists. Generic lists grow in place; a PowerShell array is
+        copied in full every time an item is added, which gets slower and
+        slower on large trees.
+    #>
+    $DirectoriesToCreate = New-Object 'System.Collections.Generic.List[string]'
+    $FilesToCopy = New-Object 'System.Collections.Generic.List[object]'
+    $FilesToUpdate = New-Object 'System.Collections.Generic.List[object]'
+    $FilesToLeaveAlone = New-Object 'System.Collections.Generic.List[string]'
+    $FilesToDelete = New-Object 'System.Collections.Generic.List[object]'
+    $DirectoriesToDelete = New-Object 'System.Collections.Generic.List[object]'
+
+    <#
+        Lookup tables, keyed by relative path (case-insensitive, as on
+        Windows and SMB shares). Built once from the trees already
+        enumerated, so the plan never has to ask the source or destination
+        (often a NAS over the network) about each item again.
+    #>
+    $SourceFileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $SourceDirectorySet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $DestinationFileMap = [System.Collections.Generic.Dictionary[string, System.IO.FileInfo]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $DestinationDirectorySet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($tmpFile in $SourceFiles)
+    {
+        [void]$SourceFileSet.Add((Get-PSSyncRelativePath $SourcePath $tmpFile.FullName))
+    }
+
+    foreach ($tmpDirectory in $SourceDirectories)
+    {
+        [void]$SourceDirectorySet.Add((Get-PSSyncRelativePath $SourcePath $tmpDirectory.FullName))
+    }
+
+    foreach ($tmpFile in $DestinationFiles)
+    {
+        $DestinationFileMap[(Get-PSSyncRelativePath $DestinationPath $tmpFile.FullName)] = $tmpFile
+    }
+
+    foreach ($tmpDirectory in $DestinationDirectories)
+    {
+        [void]$DestinationDirectorySet.Add((Get-PSSyncRelativePath $DestinationPath $tmpDirectory.FullName))
+    }
 
     $AnalyzedFileCount = 0
     $AnalyzedDirectoryCount = 0
@@ -699,9 +932,8 @@ function PSSync
     foreach ($tmpFile in $SourceFiles)
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpFile.FullName
-        $DestinationDirectoryPath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
 
-        if (Test-Path -LiteralPath $DestinationDirectoryPath -PathType Container)
+        if ($DestinationDirectorySet.Contains($RelativePath))
         {
             Write-Progress -Activity "PSSync" -Completed
             throw "File/directory conflict at relative path: $RelativePath"
@@ -711,9 +943,8 @@ function PSSync
     foreach ($tmpDirectory in $SourceDirectories)
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpDirectory.FullName
-        $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
 
-        if (Test-Path -LiteralPath $DestinationFilePath -PathType Leaf)
+        if ($DestinationFileMap.ContainsKey($RelativePath))
         {
             Write-Progress -Activity "PSSync" -Completed
             throw "File/directory conflict at relative path: $RelativePath"
@@ -727,18 +958,18 @@ function PSSync
 
     if (-not $DestinationExists)
     {
-        $DirectoriesToCreate += $DestinationPath
+        $DirectoriesToCreate.Add($DestinationPath)
     }
 
     foreach ($tmpDirectory in $SourceDirectories)
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpDirectory.FullName
         $DestinationDirectoryPath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
-        $DestinationDirectoryExists = Test-Path -LiteralPath $DestinationDirectoryPath -PathType Container
+        $DestinationDirectoryExists = $DestinationDirectorySet.Contains($RelativePath)
 
         if (-not $DestinationDirectoryExists)
         {
-            $DirectoriesToCreate += $DestinationDirectoryPath
+            $DirectoriesToCreate.Add($DestinationDirectoryPath)
         }
 
         $AnalyzedDirectoryCount = $AnalyzedDirectoryCount + 1
@@ -757,6 +988,7 @@ function PSSync
             }
 
             Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Directories: $AnalyzedDirectoryCount / $TotalDirectoryCount" -PercentComplete $PercentComplete
+            Write-Host ("PROGRESS: Analyzed source directories: {0} / {1}" -f $AnalyzedDirectoryCount, $TotalDirectoryCount)
         }
     }
 
@@ -764,37 +996,35 @@ function PSSync
     {
         $RelativePath = Get-PSSyncRelativePath $SourcePath $tmpFile.FullName
         $DestinationFilePath = Join-Path -Path $DestinationPath -ChildPath $RelativePath
-        $DestinationFileExists = Test-Path -LiteralPath $DestinationFilePath -PathType Leaf
 
-        if (-not $DestinationFileExists)
+        <#
+            The source hash is no longer calculated here. It is calculated
+            while the file is copied, so unchanged files are never read and
+            new or newer files are read only once.
+        #>
+        if (-not $DestinationFileMap.ContainsKey($RelativePath))
         {
-            $SourceHash = Get-PSSyncFileHash $tmpFile.FullName
-
-            $FilesToCopy += [PSCustomObject]@{
+            $FilesToCopy.Add([PSCustomObject]@{
                 SourceFile = $tmpFile
-                SourceHash = $SourceHash
                 RelativePath = $RelativePath
-            }
+            })
         }
         else
         {
-            $DestinationFile = Get-Item -LiteralPath $DestinationFilePath -ErrorAction Stop
+            $DestinationFile = $DestinationFileMap[$RelativePath]
             $SourceIsNewer = $tmpFile.LastWriteTimeUtc -gt $DestinationFile.LastWriteTimeUtc
 
             if ($SourceIsNewer)
             {
-                $SourceHash = Get-PSSyncFileHash $tmpFile.FullName
-
-                $FilesToUpdate += [PSCustomObject]@{
+                $FilesToUpdate.Add([PSCustomObject]@{
                     SourceFile = $tmpFile
                     DestinationFilePath = $DestinationFilePath
                     RelativePath = $RelativePath
-                    SourceHash = $SourceHash
-                }
+                })
             }
             else
             {
-                $FilesToLeaveAlone += $RelativePath
+                $FilesToLeaveAlone.Add($RelativePath)
             }
         }
 
@@ -814,18 +1044,22 @@ function PSSync
             }
 
             Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Files: $AnalyzedFileCount / $TotalFileCount" -PercentComplete $PercentComplete
+            Write-Host ("PROGRESS: Analyzed files: {0} / {1}" -f $AnalyzedFileCount, $TotalFileCount)
         }
     }
 
     foreach ($tmpFile in $DestinationFiles)
     {
         $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpFile.FullName
-        $SourceFilePath = Join-Path -Path $SourcePath -ChildPath $RelativePath
-        $SourceFileExists = Test-Path -LiteralPath $SourceFilePath -PathType Leaf
+        $SourceFileExists = $SourceFileSet.Contains($RelativePath)
 
-        if (-not $SourceFileExists)
+        if ($DeferredRelativePaths.ContainsKey($RelativePath))
         {
-            $FilesToDelete += $tmpFile
+            Write-Host ("PRESERVED DEFERRED DESTINATION: {0}" -f $RelativePath)
+        }
+        elseif (-not $SourceFileExists)
+        {
+            $FilesToDelete.Add($tmpFile)
         }
 
         $AnalyzedFileCount = $AnalyzedFileCount + 1
@@ -844,6 +1078,7 @@ function PSSync
             }
 
             Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Files: $AnalyzedFileCount / $TotalFileCount" -PercentComplete $PercentComplete
+            Write-Host ("PROGRESS: Analyzed files: {0} / {1}" -f $AnalyzedFileCount, $TotalFileCount)
         }
     }
 
@@ -857,12 +1092,11 @@ function PSSync
         foreach ($tmpDirectory in $SortedDestinationDirectories)
         {
             $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpDirectory.FullName
-            $SourceDirectoryPath = Join-Path -Path $SourcePath -ChildPath $RelativePath
-            $SourceDirectoryExists = Test-Path -LiteralPath $SourceDirectoryPath -PathType Container
+            $SourceDirectoryExists = $SourceDirectorySet.Contains($RelativePath)
 
             if (-not $SourceDirectoryExists)
             {
-                $DirectoriesToDelete += $tmpDirectory
+                $DirectoriesToDelete.Add($tmpDirectory)
             }
 
             $AnalyzedDirectoryCount = $AnalyzedDirectoryCount + 1
@@ -881,6 +1115,7 @@ function PSSync
                 }
 
                 Write-Progress -Activity "PSSync" -Status "Analyzing source and destination... Directories: $AnalyzedDirectoryCount / $TotalDirectoryCount" -PercentComplete $PercentComplete
+                Write-Host ("PROGRESS: Analyzed destination directories: {0} / {1}" -f $AnalyzedDirectoryCount, $TotalDirectoryCount)
             }
         }
     }
@@ -925,6 +1160,20 @@ function PSSync
 
         if ($Mirror)
         {
+            foreach ($tmpItem in $ExcludedToDelete)
+            {
+                $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpItem.FullName
+                if ($tmpItem -is [System.IO.DirectoryInfo])
+                {
+                    Write-Host "WOULD DELETE EXCLUDED DIRECTORY: $RelativePath"
+                }
+                else
+                {
+                    Write-Host "WOULD DELETE EXCLUDED: $RelativePath"
+                }
+                $WouldDeleteExcludedCount = $WouldDeleteExcludedCount + 1
+            }
+
             foreach ($tmpFile in $FilesToDelete)
             {
                 $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpFile.FullName
@@ -948,7 +1197,10 @@ function PSSync
         Write-Host "Would Leave Alone:      $WouldLeaveAloneCount"
         Write-Host "Would Delete Files:     $WouldDeleteFileCount"
         Write-Host "Would Delete Dirs:      $WouldDeleteDirectoryCount"
+        Write-Host "Would Delete Excluded:  $WouldDeleteExcludedCount"
         Write-Host "Would Create Dirs:      $WouldCreateDirectoryCount"
+        Write-Host "Would Defer Transient:  $DeferredFileCount"
+        Write-Host "Excluded Items:         $ExcludedCount"
         Write-Host "------------------------------"
         Write-Host "Source:                 $SourcePath"
         Write-Host "Destination:            $DestinationPath"
@@ -959,7 +1211,7 @@ function PSSync
 # +----------------------------------------------------------------------------+
 # | Directory Creation                                                         |
 # +----------------------------------------------------------------------------+
-    $TotalExecutionOperationCount = $DirectoriesToCreate.Count + $FilesToCopy.Count + $FilesToUpdate.Count + $FilesToLeaveAlone.Count + $FilesToDelete.Count + $DirectoriesToDelete.Count
+    $TotalExecutionOperationCount = $DirectoriesToCreate.Count + $FilesToCopy.Count + $FilesToUpdate.Count + $FilesToLeaveAlone.Count + $FilesToDelete.Count + $DirectoriesToDelete.Count + $ExcludedToDelete.Count
     $CompletedExecutionOperationCount = 0
 
     if ($TotalExecutionOperationCount -gt 0)
@@ -994,12 +1246,17 @@ function PSSync
 
         try
         {
-            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $DestinationFilePath -ExpectedSourceHash $tmpFile.SourceHash -Operation "Copying"
+            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $DestinationFilePath -Operation "Copying"
 
             if ($Verified)
             {
                 $CopiedCount = $CopiedCount + 1
                 Write-Host "COPIED: $RelativePath"
+            }
+            elseif ($script:LastCopyWasDeferred)
+            {
+                $DeferredFileCount = $DeferredFileCount + 1
+                $DeferredRelativePaths[$RelativePath] = $true
             }
             else
             {
@@ -1011,10 +1268,34 @@ function PSSync
         }
         catch
         {
-            $ErrorCount = $ErrorCount + 1
             $CompletedExecutionOperationCount = $CompletedExecutionOperationCount + 1
             Write-Progress -Activity "PSSync" -Status "Failed: $RelativePath" -PercentComplete ([int](($CompletedExecutionOperationCount / $TotalExecutionOperationCount) * 100))
-            Write-Host "ERROR: Unable to copy file: $RelativePath"
+
+            <#
+                A file that is locked or disappeared (for example in use by
+                another program) is deferred to the next run, not an error.
+            #>
+            <#
+                Windows PowerShell 5.1 cannot open a path of MAX_PATH (260)
+                characters or more. That is permanent, so it is an error,
+                not a deferred file that would be skipped every run.
+            #>
+            if ($DestinationFilePath.Length -ge 260 -or $tmpFile.SourceFile.FullName.Length -ge 260)
+            {
+                $ErrorCount = $ErrorCount + 1
+                Write-Host ("ERROR: Path too long (260 or more characters) to copy file: {0}; destination path is {1} characters" -f $RelativePath, $DestinationFilePath.Length)
+            }
+            elseif (Test-PSSyncFileTransient -Exception $_.Exception)
+            {
+                $DeferredFileCount = $DeferredFileCount + 1
+                $DeferredRelativePaths[$RelativePath] = $true
+                Write-Host ("DEFERRED TRANSIENT FILE: {0}; {1}" -f $RelativePath, $_.Exception.Message)
+            }
+            else
+            {
+                $ErrorCount = $ErrorCount + 1
+                Write-Host ("ERROR: Unable to copy file: {0}; {1}" -f $RelativePath, $_.Exception.Message)
+            }
         }
     }
 
@@ -1025,12 +1306,17 @@ function PSSync
     {
         try
         {
-            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $tmpFile.DestinationFilePath -ExpectedSourceHash $tmpFile.SourceHash -Operation "Updating"
+            $Verified = Copy-PSSyncFile -SourceFile $tmpFile.SourceFile -DestinationFilePath $tmpFile.DestinationFilePath -Operation "Updating"
 
             if ($Verified)
             {
                 $UpdatedCount = $UpdatedCount + 1
                 Write-Host "UPDATED: $($tmpFile.RelativePath)"
+            }
+            elseif ($script:LastCopyWasDeferred)
+            {
+                $DeferredFileCount = $DeferredFileCount + 1
+                $DeferredRelativePaths[$tmpFile.RelativePath] = $true
             }
             else
             {
@@ -1042,10 +1328,30 @@ function PSSync
         }
         catch
         {
-            $ErrorCount = $ErrorCount + 1
             $CompletedExecutionOperationCount = $CompletedExecutionOperationCount + 1
             Write-Progress -Activity "PSSync" -Status "Failed: $($tmpFile.RelativePath)" -PercentComplete ([int](($CompletedExecutionOperationCount / $TotalExecutionOperationCount) * 100))
-            Write-Host "ERROR: Unable to update file: $($tmpFile.RelativePath)"
+
+            <#
+                Windows PowerShell 5.1 cannot open a path of MAX_PATH (260)
+                characters or more. That is permanent, so it is an error,
+                not a deferred file that would be skipped every run.
+            #>
+            if ($tmpFile.DestinationFilePath.Length -ge 260 -or $tmpFile.SourceFile.FullName.Length -ge 260)
+            {
+                $ErrorCount = $ErrorCount + 1
+                Write-Host ("ERROR: Path too long (260 or more characters) to update file: {0}; destination path is {1} characters" -f $tmpFile.RelativePath, $tmpFile.DestinationFilePath.Length)
+            }
+            elseif (Test-PSSyncFileTransient -Exception $_.Exception)
+            {
+                $DeferredFileCount = $DeferredFileCount + 1
+                $DeferredRelativePaths[$tmpFile.RelativePath] = $true
+                Write-Host ("DEFERRED TRANSIENT FILE: {0}; {1}" -f $tmpFile.RelativePath, $_.Exception.Message)
+            }
+            else
+            {
+                $ErrorCount = $ErrorCount + 1
+                Write-Host ("ERROR: Unable to update file: {0}; {1}" -f $tmpFile.RelativePath, $_.Exception.Message)
+            }
         }
     }
 
@@ -1070,6 +1376,40 @@ function PSSync
 # +----------------------------------------------------------------------------+
     if ($Mirror)
     {
+        <#
+            -DeleteExcluded: remove excluded destination items first, so a
+            destination-only directory that held only excluded items is
+            empty when the directory deletions below run.
+        #>
+        foreach ($tmpItem in $ExcludedToDelete)
+        {
+            $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpItem.FullName
+            $IsExcludedDirectory = $tmpItem -is [System.IO.DirectoryInfo]
+
+            try
+            {
+                if ($IsExcludedDirectory)
+                {
+                    Remove-Item -LiteralPath $tmpItem.FullName -Recurse -Force -ErrorAction Stop
+                    Write-Host "DELETED EXCLUDED DIRECTORY: $RelativePath"
+                }
+                else
+                {
+                    Remove-Item -LiteralPath $tmpItem.FullName -Force -ErrorAction Stop
+                    Write-Host "DELETED EXCLUDED: $RelativePath"
+                }
+                $DeletedExcludedCount = $DeletedExcludedCount + 1
+            }
+            catch
+            {
+                $ErrorCount = $ErrorCount + 1
+                Write-Host ("ERROR: Unable to delete excluded item: {0}; {1}" -f $RelativePath, $_.Exception.Message)
+            }
+
+            $CompletedExecutionOperationCount = $CompletedExecutionOperationCount + 1
+            Write-Progress -Activity "PSSync" -Status "Deleted excluded: $RelativePath" -PercentComplete ([int](($CompletedExecutionOperationCount / $TotalExecutionOperationCount) * 100))
+        }
+
         foreach ($tmpFile in $FilesToDelete)
         {
             $RelativePath = Get-PSSyncRelativePath $DestinationPath $tmpFile.FullName
@@ -1138,7 +1478,10 @@ function PSSync
     Write-Host "Unchanged:           $UnchangedCount"
     Write-Host "Deleted Files:       $DeletedFileCount"
     Write-Host "Deleted Directories: $DeletedDirectoryCount"
+    Write-Host "Deleted Excluded:    $DeletedExcludedCount"
     Write-Host "Errors:              $ErrorCount"
+    Write-Host "Deferred Files:      $DeferredFileCount"
+    Write-Host "Excluded Items:      $ExcludedCount"
     Write-Host "------------------------------"
     Write-Host "Source:              $SourcePath"
     Write-Host "Destination:         $DestinationPath"

@@ -2,6 +2,11 @@
   <Folder Name="/Solution Items/">
     <File Path="PSScriptAnalyzerSettings.psd1" />
     <File Path="PSSync.psm1" />
+    <File Path="Backup/Invoke-PSSyncBackup.ps1" />
+    <File Path="Backup/Register-PSSyncBackupTask.ps1" />
+    <File Path="Backup/PSSyncBackup.Settings.example.psd1" />
+    <File Path="Backup/PSSyncBackup.Exclusions.txt" />
+    <File Path="Backup/README.md" />
   </Folder>
   <Folder Name="/Solution Items/Tests/">
     <File Path="Tests/PSSync.Tests.ps1" />
