@@ -27,6 +27,16 @@ DPAPI-encrypted files can only be decrypted by the Windows account that created 
 
 The repository only contains `PSSyncBackup.Settings.example.psd1`, which uses placeholder values.
 
+### Installed from the PowerShell Gallery
+
+`Install-Module PSSync` includes these backup scripts in a `Backup` folder inside the module. Find it with:
+
+```powershell
+Join-Path (Get-Module PSSync -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1).ModuleBase 'Backup'
+```
+
+Run the commands below from the module folder (the one that contains `Backup`) in place of the repository root. **Always pass `-ConfigDirectory` with a folder of your own**, and keep a copy of the exclusion file there if you edit it (point `ExclusionFile` at it with a full path): the module folder is replaced when PSSync is updated, so nothing you create or change inside it is kept.
+
 ## Setup
 
 Run these from the repository root in Windows PowerShell 5.1, signed in as the account that will run the backup. First choose the config folder; the examples below use a cloud-synced folder, or leave out the first line's path to use the default `Backup\Config`:

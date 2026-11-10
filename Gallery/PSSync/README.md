@@ -25,6 +25,10 @@ It synchronizes files and directories from a source tree to a destination tree u
 - Reports file-system operation errors and provides a final summary.
 
 
+## Nightly backup
+The `Backup` folder contains a ready-made nightly backup that mirrors local drives to a NAS share with PSSync: live logging to a synced folder, failure email, Outlook handling, and a Task Scheduler registration script. See `Backup/README.md` for setup.
+
+
 ## Requirements
 - Windows PowerShell 5.1 or later
 - Pester 3.4.0 or compatible Pester version for running the included tests
