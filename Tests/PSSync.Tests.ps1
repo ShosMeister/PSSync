@@ -1101,4 +1101,35 @@ Describe "PSSync Module" {
             Remove-PSSyncTestRoot $TestRoot
         }
     }
+
+    It "Updates a hidden destination file" {
+        $TestRoot = New-PSSyncTestRoot
+        $SourcePath = Join-Path $TestRoot "Source"
+        $DestinationPath = Join-Path $TestRoot "Destination"
+        $SourceFilePath = Join-Path $SourcePath ".gitignore"
+        $DestinationFilePath = Join-Path $DestinationPath ".gitignore"
+
+        try
+        {
+            New-Item -ItemType Directory -Path $SourcePath -Force | Out-Null
+            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+            Set-Content -Path $SourceFilePath -Value "NEW SOURCE CONTENT"
+            Set-Content -Path $DestinationFilePath -Value "OLD DESTINATION CONTENT WITH MORE TEXT"
+
+            $SourceFile = Get-Item -LiteralPath $SourceFilePath -Force
+            $DestinationFile = Get-Item -LiteralPath $DestinationFilePath -Force
+            $DestinationFile.LastWriteTime = $SourceFile.LastWriteTime.AddMinutes(-10)
+            $DestinationFile.Attributes = $DestinationFile.Attributes -bor [System.IO.FileAttributes]::Hidden
+
+            PSSync $SourcePath $DestinationPath
+
+            (Get-Content -LiteralPath $DestinationFilePath -Raw -Force).Trim() |
+                Should Be "NEW SOURCE CONTENT"
+        }
+        finally
+        {
+            Remove-PSSyncTestRoot $TestRoot
+        }
+    }
 }

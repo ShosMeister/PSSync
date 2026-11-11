@@ -507,12 +507,21 @@ function Copy-PSSyncFile
             [System.IO.FileShare]::Read
         )
 
+        <#
+            OpenOrCreate and then truncate, rather than FileMode Create:
+            Windows refuses to replace an existing file that is hidden or
+            system with Create ("Access denied"). Many NAS shares mark files
+            whose names start with a dot as hidden, so Create fails on the
+            second copy of files such as .gitignore. Truncating the opened
+            file replaces its contents without that check.
+        #>
         $DestinationStream = [System.IO.File]::Open(
             $DestinationFilePath,
-            [System.IO.FileMode]::Create,
+            [System.IO.FileMode]::OpenOrCreate,
             [System.IO.FileAccess]::Write,
             [System.IO.FileShare]::None
         )
+        $DestinationStream.SetLength(0)
 
         $HashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
         $Buffer = New-Object byte[] $BUFFER_SIZE
